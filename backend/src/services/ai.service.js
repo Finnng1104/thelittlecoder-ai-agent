@@ -1,4 +1,5 @@
 const axios = require("axios");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { MY_PAST_POSTS } = require("../constants/my_style");
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -28,6 +29,20 @@ NHIỆM VỤ:
 2. Tuyệt đối không lộ ra mình là AI.
 3. Giữ cấu trúc: Câu mở đầu gây chú ý -> Phân tích thực chiến -> Câu hỏi thảo luận.
 `.trim();
+
+const IMAGE_PROMPT_SYSTEM = `
+You are a senior prompt engineer for The Little Coder visual identity.
+Return only one final English image prompt for Flux.
+Requirements:
+- Keep fixed layout: dark room, black desk, cyan neon panel, ant mascot behind laptop, laptop text "the little coder".
+- Preserve readability of neon text.
+- No markdown, no explanation, no numbered list.
+`.trim();
+
+const FALLBACK_IMAGE_PROMPT =
+  "Minimalist 3D tech-noir room, matte black desk, black laptop with text 'the little coder', " +
+  "small stylized ant mascot behind laptop with cyan glowing antennae, unobstructed cyan neon panel, " +
+  "cinematic lighting, sharp focus, isometric tech style, no extra text outside panel.";
 
 async function askAI(question, options = {}) {
   try {
@@ -106,4 +121,38 @@ async function askAI(question, options = {}) {
   }
 }
 
-module.exports = { askAI, DEEP_RESEARCH_PROMPT };
+async function getBetterImagePrompt(topic, options = {}) {
+  try {
+    const googleKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_AI_KEY;
+    if (!googleKey) {
+      throw new Error("Missing GOOGLE_API_KEY (or GOOGLE_AI_KEY)");
+    }
+
+    const modelName = options.model || process.env.GEMINI_IMAGE_PROMPT_MODEL || "gemini-2.5-flash";
+    const genAI = new GoogleGenerativeAI(googleKey);
+    const model = genAI.getGenerativeModel({ model: modelName });
+
+    const postExcerpt = String(options.postText || "")
+      .replace(/\s+/g, " ")
+      .slice(0, 800)
+      .trim();
+
+    const promptInput = [
+      IMAGE_PROMPT_SYSTEM,
+      `Topic: ${topic}`,
+      postExcerpt ? `Post excerpt: ${postExcerpt}` : "",
+      "Create one highly-detailed Flux prompt preserving The Little Coder layout and replacing panel content by this topic.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const result = await model.generateContent(promptInput);
+    const text = result.response.text().replace(/\s+/g, " ").trim();
+    return text || `${FALLBACK_IMAGE_PROMPT} Topic: ${topic}`;
+  } catch (error) {
+    console.error("[ai.service] Gemini image prompt error:", error.message);
+    return `${FALLBACK_IMAGE_PROMPT} Topic: ${topic}`;
+  }
+}
+
+module.exports = { askAI, DEEP_RESEARCH_PROMPT, getBetterImagePrompt };

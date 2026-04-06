@@ -3,7 +3,7 @@ const { Telegraf, Markup } = require("telegraf");
 const { askAI, DEEP_RESEARCH_PROMPT } = require("./src/services/ai.service");
 const { researchToday } = require("./src/services/search.service");
 const {
-  generateImageUrl,
+  generateImageAsset,
   downloadImageBuffer,
 } = require("./src/services/image.service");
 const { postToFacebook, deleteFacebookPost } = require("./src/services/facebook.service");
@@ -11,6 +11,7 @@ const { postToFacebook, deleteFacebookPost } = require("./src/services/facebook.
 const telegramToken = process.env.TELEGRAM_TOKEN;
 const draftStore = new Map();
 const TELEGRAM_CAPTION_MAX = 1024;
+const TELEGRAM_MESSAGE_SAFE_LIMIT = 3800;
 
 if (!telegramToken) {
   throw new Error("Missing TELEGRAM_TOKEN in backend/.env");
@@ -41,38 +42,117 @@ function toCaption(postText) {
   return { caption: trimmed, truncated: true };
 }
 
-async function sendDraftPreview(ctx, imageUrl, postText) {
-  const { caption, truncated } = toCaption(postText);
+function splitLongText(text, limit = TELEGRAM_MESSAGE_SAFE_LIMIT) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    return [];
+  }
 
-  try {
-    await ctx.replyWithPhoto(imageUrl, {
-      caption,
-      ...buildDraftKeyboard(),
-    });
-  } catch (imgUrlError) {
-    console.log("[bot] URL image failed, try upload buffer:", imgUrlError.message);
+  if (raw.length <= limit) {
+    return [raw];
+  }
+
+  const chunks = [];
+  let remaining = raw;
+
+  while (remaining.length > limit) {
+    let splitAt = remaining.lastIndexOf("\n", limit);
+    if (splitAt < Math.floor(limit * 0.5)) {
+      splitAt = remaining.lastIndexOf(" ", limit);
+    }
+    if (splitAt < Math.floor(limit * 0.5)) {
+      splitAt = limit;
+    }
+
+    const chunk = remaining.slice(0, splitAt).trim();
+    if (chunk) {
+      chunks.push(chunk);
+    }
+    remaining = remaining.slice(splitAt).trim();
+  }
+
+  if (remaining) {
+    chunks.push(remaining);
+  }
+
+  return chunks;
+}
+
+function isTelegramPhotoMime(mimeType) {
+  return /^image\/(jpeg|jpg|png)$/i.test(String(mimeType || ""));
+}
+
+async function safeReplyLongText(ctx, text, extra) {
+  const chunks = splitLongText(text);
+  if (chunks.length === 0) {
+    return;
+  }
+
+  await ctx.reply(chunks[0], extra);
+  for (let i = 1; i < chunks.length; i += 1) {
+    await ctx.reply(chunks[i]);
+  }
+}
+
+async function sendDraftPreview(ctx, imageAsset, postText) {
+  const { caption, truncated } = toCaption(postText);
+  const imageUrl = imageAsset?.url || imageAsset?.imageUrl || "";
+  const hasBuffer = imageAsset?.type === "buffer" && Buffer.isBuffer(imageAsset.buffer);
+
+  const sendFromUrlWithFallback = async (url) => {
+    if (!url) {
+      throw new Error("Missing image URL");
+    }
 
     try {
-      const imageBuffer = await downloadImageBuffer(imageUrl);
+      await ctx.replyWithPhoto(url, {
+        caption,
+        ...buildDraftKeyboard(),
+      });
+      return;
+    } catch (imgUrlError) {
+      console.log("[bot] URL image failed, try upload buffer:", imgUrlError.message);
+    }
+
+    const { buffer: imageBuffer, mimeType } = await downloadImageBuffer(url, true);
+    if (!isTelegramPhotoMime(mimeType)) {
+      throw new Error(`Unsupported image mime for Telegram photo: ${mimeType}`);
+    }
+    await ctx.replyWithPhoto(
+      { source: imageBuffer, filename: "draft-banner.png" },
+      {
+        caption,
+        ...buildDraftKeyboard(),
+      }
+    );
+  };
+
+  try {
+    if (hasBuffer) {
       await ctx.replyWithPhoto(
-        { source: imageBuffer, filename: "draft-banner.png" },
+        { source: imageAsset.buffer, filename: "draft-banner.png" },
         {
           caption,
           ...buildDraftKeyboard(),
         }
       );
-    } catch (uploadError) {
-      console.log("[bot] Buffer upload failed, fallback text:", uploadError.message);
-      await ctx.reply(
-        `BAN THAO (loi hien thi anh):\n\nLink anh: ${imageUrl}\n\n${postText}`,
-        buildDraftKeyboard()
-      );
-      return;
+    } else if (imageUrl) {
+      await sendFromUrlWithFallback(imageUrl);
+    } else {
+      throw new Error("No image data from generator");
     }
+  } catch (imageError) {
+    console.log("[bot] Preview image failed, fallback text:", imageError.message);
+    await safeReplyLongText(
+      ctx,
+      `BAN THAO (loi hien thi anh):\n\n${imageUrl ? `Link anh: ${imageUrl}\n\n` : ""}${postText}`,
+      buildDraftKeyboard()
+    );
+    return;
   }
 
   if (truncated) {
-    await ctx.reply(`Ban day du:\n\n${postText}`);
+    await safeReplyLongText(ctx, `Ban day du:\n\n${postText}`);
   }
 }
 
@@ -188,16 +268,21 @@ bot.on("text", async (ctx) => {
         }
       );
 
-      await updateStatus(ctx, statusMsg, "[4/4] Dang tao banner va dong goi ban thao...");
+      await updateStatus(
+        ctx,
+        statusMsg,
+        "[4/4] Gemini dang tao banner theo bo cuc The Little Coder..."
+      );
 
-      const finalImageUrl = generateImageUrl(topic);
+      const imageAsset = await generateImageAsset(topic, "default");
       draftStore.set(chatId, {
         postText: finalPost,
-        imageUrl: finalImageUrl,
         topic,
+        imageAsset,
+        imageUrl: imageAsset?.url || null,
       });
 
-      await sendDraftPreview(ctx, finalImageUrl, finalPost);
+      await sendDraftPreview(ctx, imageAsset, finalPost);
       await updateStatus(
         ctx,
         statusMsg,
@@ -223,7 +308,7 @@ bot.on("text", async (ctx) => {
   const aiAnswer = await askAI(userText, {
     timeout: 300000,
   });
-  await ctx.reply(aiAnswer);
+  await safeReplyLongText(ctx, aiAnswer);
 });
 
 bot.catch(async (error, ctx) => {
@@ -253,11 +338,15 @@ bot.action("regen_image", async (ctx) => {
 
   await ctx.answerCbQuery("Dang tao anh moi...");
 
-  const newImageUrl = generateImageUrl(draft.topic);
-  const updatedDraft = { ...draft, imageUrl: newImageUrl };
+  const newImageAsset = await generateImageAsset(draft.topic, "default");
+  const updatedDraft = {
+    ...draft,
+    imageAsset: newImageAsset,
+    imageUrl: newImageAsset?.url || null,
+  };
   draftStore.set(chatId, updatedDraft);
 
-  await sendDraftPreview(ctx, newImageUrl, updatedDraft.postText);
+  await sendDraftPreview(ctx, newImageAsset, updatedDraft.postText);
 });
 
 bot.action("confirm_post", async (ctx) => {
@@ -286,7 +375,10 @@ bot.action("confirm_post", async (ctx) => {
       await ctx.reply("Dang day bai len Fanpage...");
     }
 
-    const fbPostId = await postToFacebook(draft.postText, draft.imageUrl || null);
+    const fbPostId = await postToFacebook(
+      draft.postText,
+      draft.imageAsset || draft.imageUrl || null
+    );
     draftStore.delete(chatId);
 
     try {

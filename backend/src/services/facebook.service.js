@@ -1,4 +1,5 @@
 const axios = require("axios");
+const FormData = require("form-data");
 
 function getFacebookCredentials() {
   const pageId = process.env.FB_PAGE_ID || process.env.FACEBOOK_PAGE_ID;
@@ -13,18 +14,68 @@ function getFacebookCredentials() {
   return { pageId, pageToken };
 }
 
-async function postToFacebook(message, imageUrl = null) {
+function normalizeImageInput(imageInput) {
+  if (!imageInput) {
+    return { mode: "none" };
+  }
+
+  if (typeof imageInput === "string") {
+    return { mode: "url", url: imageInput };
+  }
+
+  if (Buffer.isBuffer(imageInput?.buffer)) {
+    return {
+      mode: "buffer",
+      buffer: imageInput.buffer,
+      mimeType: imageInput.mimeType || "image/png",
+    };
+  }
+
+  if (typeof imageInput?.url === "string" && imageInput.url) {
+    return { mode: "url", url: imageInput.url };
+  }
+
+  return { mode: "none" };
+}
+
+async function postToFacebook(message, imageInput = null) {
   try {
     const { pageId, pageToken } = getFacebookCredentials();
-    const endpoint = imageUrl
-      ? `https://graph.facebook.com/v20.0/${pageId}/photos`
-      : `https://graph.facebook.com/v20.0/${pageId}/feed`;
+    const normalized = normalizeImageInput(imageInput);
 
-    const payload = imageUrl
-      ? { url: imageUrl, caption: message, access_token: pageToken }
-      : { message, access_token: pageToken };
+    if (normalized.mode === "buffer") {
+      const form = new FormData();
+      form.append("source", normalized.buffer, {
+        filename: "cover.png",
+        contentType: normalized.mimeType,
+      });
+      form.append("caption", message);
+      form.append("access_token", pageToken);
 
-    const response = await axios.post(endpoint, payload);
+      const response = await axios.post(
+        `https://graph.facebook.com/v20.0/${pageId}/photos`,
+        form,
+        {
+          headers: form.getHeaders(),
+          maxBodyLength: Infinity,
+        }
+      );
+      return response.data.post_id || response.data.id;
+    }
+
+    if (normalized.mode === "url") {
+      const response = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/photos`, {
+        url: normalized.url,
+        caption: message,
+        access_token: pageToken,
+      });
+      return response.data.post_id || response.data.id;
+    }
+
+    const response = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/feed`, {
+      message,
+      access_token: pageToken,
+    });
     return response.data.post_id || response.data.id;
   } catch (error) {
     console.error("[facebook.service] FB API error:", error.response?.data || error.message);
