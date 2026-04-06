@@ -71,6 +71,28 @@ NHIỆM VỤ:
 4. Tuân thủ chặt output JSON ở trên.
 `.trim();
 
+const REFINE_CONTENT_PROMPT = `
+${THE_LITTLE_CODER_ENGINE_V2_JSON}
+
+[REFINE MODE]
+Nhiem vu cua ban:
+- Chuyen doi noi dung tho cua Tien thanh bai dang Facebook theo phong cach "The Little Coder".
+
+Yeu cau bat buoc:
+1. GIU NGUYEN y nghia, moc thoi gian, nguyen nhan, cam xuc cot loi trong noi dung goc.
+2. Chi nang cap cach dien dat: gon hon, ro hon, co vibe Dev Viet thuc chien.
+3. Co the dung tu vung ky thuat mot cach tu nhien (fix bug cuoc doi, refactor lo trinh, reboot ban than...) nhung KHONG duoc lam sai thong tin.
+4. Ap dung quy tac format Facebook da cho (emoji diem neo, ngat doan hop ly, nhan manh bang VIET HOA).
+5. Tuyet doi KHONG chen markdown (** __ code-fence), KHONG viet loi giai thich ben ngoai.
+6. Bat buoc tra ve JSON dung schema:
+{
+  "post_content": "...",
+  "image_short_title": "...",
+  "ant_action": "...",
+  "log_message": "..."
+}
+`.trim();
+
 const IMAGE_PROMPT_SYSTEM = `
 You are a senior prompt engineer for The Little Coder visual identity.
 Return only one final English image prompt for Flux/Imagen.
@@ -346,4 +368,9 @@ async function getBetterImagePrompt(topic, options = {}) {
   }
 }
 
-module.exports = { askAI, DEEP_RESEARCH_PROMPT, getBetterImagePrompt };
+module.exports = {
+  askAI,
+  DEEP_RESEARCH_PROMPT,
+  REFINE_CONTENT_PROMPT,
+  getBetterImagePrompt,
+};

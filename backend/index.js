@@ -1,6 +1,10 @@
 require("dotenv").config();
 const { Telegraf, Markup } = require("telegraf");
-const { askAI, DEEP_RESEARCH_PROMPT } = require("./src/services/ai.service");
+const {
+  askAI,
+  DEEP_RESEARCH_PROMPT,
+  REFINE_CONTENT_PROMPT,
+} = require("./src/services/ai.service");
 const { researchToday } = require("./src/services/search.service");
 const {
   generateImageAsset,
@@ -93,6 +97,38 @@ function extractDeleteCommandArg(text) {
   }
 
   return rawArg.split(/\s+/)[0].trim();
+}
+
+function extractRewriteInput(text) {
+  const normalizedText = String(text || "")
+    .replace(/\u200b/g, "")
+    .trim();
+  if (!normalizedText) {
+    return null;
+  }
+
+  const commandMatch = normalizedText.match(/^\/rewrite(?:@\w+)?(?:\s+([\s\S]+))?$/i);
+  if (commandMatch) {
+    return String(commandMatch[1] || "").trim();
+  }
+
+  const prefixMatch = normalizedText.match(/^(?:viet lai|viết lại|content)\s*:\s*([\s\S]+)$/i);
+  if (prefixMatch) {
+    return String(prefixMatch[1] || "").trim();
+  }
+
+  return null;
+}
+
+function buildTopicFromRawContent(rawContent) {
+  const cleaned = String(rawContent || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) {
+    return "chia se ca nhan";
+  }
+
+  return cleaned.slice(0, 120);
 }
 
 function toCaption(postText) {
@@ -344,6 +380,83 @@ async function runDeletePostFlow(ctx, inputPostId = "") {
   }
 }
 
+async function runRewriteFlow(ctx, rawContent) {
+  const chatId = String(ctx.chat.id);
+  if (chatId !== ownerChatId()) {
+    return;
+  }
+
+  const userRaw = String(rawContent || "").trim();
+  if (!userRaw) {
+    await ctx.reply(
+      "Ban hay gui: /rewrite <noi dung tho>\nHoac: Viet lai: <noi dung tho>"
+    );
+    return;
+  }
+
+  const statusMsg = await ctx.reply("[1/3] Dang refactor noi dung theo phong cach The Little Coder...");
+
+  try {
+    const structuredRaw = await askAI(
+      `Noi dung tho cua Tien:\n${userRaw}\n\n` +
+        "Hay giu nguyen y chinh, chi chinh sua ngon tu va tra ve JSON dung schema.",
+      {
+        systemPrompt: REFINE_CONTENT_PROMPT,
+        model:
+          process.env.AI_MODEL ||
+          process.env.OPENROUTER_DEEP_MODEL ||
+          process.env.OPENROUTER_MODEL,
+        temperature: 0.4,
+        timeout: 300000,
+        throwOnError: true,
+      }
+    );
+
+    await updateStatus(
+      ctx,
+      statusMsg,
+      "[2/3] Dang parse JSON va don dep noi dung de tao ban thao..."
+    );
+
+    const structured = parseStructuredAiOutput(structuredRaw, buildTopicFromRawContent(userRaw));
+    const finalPost = formatForFacebook(structured.post_content);
+    const imageMeta = {
+      topic: buildTopicFromRawContent(userRaw),
+      image_short_title: structured.image_short_title,
+      ant_action: structured.ant_action,
+      log_message: structured.log_message,
+    };
+
+    await updateStatus(
+      ctx,
+      statusMsg,
+      "[3/3] Dang tao banner va gui ban thao de duyet..."
+    );
+
+    const imageAsset = await generateImageAsset(imageMeta, "default");
+    draftStore.set(chatId, {
+      postText: finalPost,
+      topic: imageMeta.topic,
+      imageMeta,
+      imageAsset,
+      imageUrl: imageAsset?.url || null,
+      source: "rewrite",
+      rawContent: userRaw,
+    });
+
+    await sendDraftPreview(ctx, imageAsset, finalPost);
+    await updateStatus(
+      ctx,
+      statusMsg,
+      "Da refactor xong. Ban thao san sang, bam Duyet & Dang bai neu ok."
+    );
+  } catch (error) {
+    console.error("[bot] Rewrite workflow error:", error.message);
+    await updateStatus(ctx, statusMsg, "Rewrite bi gian doan. Dang bao loi...");
+    await ctx.reply(`Rewrite that bai: ${error.message}`);
+  }
+}
+
 bot.start((ctx) => {
   ctx.reply(
     "Chao Tien! Toi da san sang research, viet bai va tao banner."
@@ -352,13 +465,18 @@ bot.start((ctx) => {
 
 bot.help((ctx) => {
   ctx.reply(
-    "Lenh hien tai: /start, /help, /post <chu de>, /delete <post_id>."
+    "Lenh hien tai: /start, /help, /post <chu de>, /rewrite <noi dung tho>, /delete <post_id>."
   );
 });
 
 bot.command("delete", async (ctx) => {
   const postId = extractDeleteCommandArg(ctx.message?.text || "") || "";
   await runDeletePostFlow(ctx, postId);
+});
+
+bot.command("rewrite", async (ctx) => {
+  const rawContent = extractRewriteInput(ctx.message?.text || "");
+  await runRewriteFlow(ctx, rawContent || "");
 });
 
 bot.on("text", async (ctx) => {
@@ -373,6 +491,12 @@ bot.on("text", async (ctx) => {
   const deleteArg = extractDeleteCommandArg(userText);
   if (deleteArg !== null) {
     await runDeletePostFlow(ctx, deleteArg);
+    return;
+  }
+
+  const rewriteInput = extractRewriteInput(userText);
+  if (rewriteInput !== null) {
+    await runRewriteFlow(ctx, rewriteInput);
     return;
   }
 
