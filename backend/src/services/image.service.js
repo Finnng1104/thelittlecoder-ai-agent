@@ -3,44 +3,30 @@ const fs = require("fs");
 const path = require("path");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-const THE_LITTLE_CODER_BASE_PROMPT = `
-# THE LITTLE CODER - VISUAL IDENTITY & PERFECT LAYOUT
-
-## Core Aesthetic:
-- Style: Minimalist Geometric 3D Render, Low-Poly Aesthetic, Tech-Noir.
-- Color Palette: Deep Black Background (#111111), Electric Cyan (#00C8C8) light accents.
-
-## The Perfect Layout (Fixed):
-- Background: A clean, deeply shadowed black room. Subtle abstract cyan geometric light lines are barely visible in the far distance, creating a thoughtful, determined atmosphere.
-- Desk: A large, centered matte black desk with subtle cyan neon light edges.
-- Foreground Element: Positioned centrally on the desk is a sleek matte black laptop. The laptop lid displays the centered teal code: "the little coder".
-- Main Mascot: A newly designed, small, sturdy stylized minimalist 3D ant mascot, rendered in dark matte grey (#111111). The ant is standing carefully behind the desk and the laptop, looking determinedly forward. Critically, its antennae are stylized and emit a distinct, flickering electric cyan glow effect. Subtle cyan light glints off its segmented body and geometric form.
-- The Neon Panel (Unobstructed): Positioned behind the desk and ant, a large, centered glowing cyan neon panel (rectangle shape, like a chalkboard) will display the content. Minimalist cyan mono font. The ant's state and position remain fixed.
-
-## Dynamic Content Replacement (On the Neon Panel):
-- Future blog posts will only replace the Vietnamese text and the console log message on the neon panel.
-- All original fixed elements (icons, positions) must remain unobstructed.
-
-High-quality 3D render, isometric tech style, cinematic lighting, sharp focus, vibrant colors, minimalist background, professional developer vibe, no watermark, no logo.
-`.trim();
 const INLINE_FALLBACK_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+AP6XqVYxQAAAABJRU5ErkJggg==";
-const DEFAULT_REFERENCE_IMAGE_RELATIVE_PATH = "assets/anh-mau.jpg";
+const DEFAULT_REFERENCE_IMAGE_RELATIVE_PATH = "assets/anh-mau.png";
 
 function sanitizeTopic(topic) {
   return String(topic || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeAscii(text) {
+  return String(text || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\w\s]/g, " ")
+    .replace(/[^\w\s-]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function stripNoiseWords(topic) {
-  return topic
+  return normalizeAscii(topic)
     .replace(
       /\b(post|chia se|hanh trinh|ve|viet bai|bai viet|share|story|journey)\b/gi,
-      " ",
+      " "
     )
     .replace(/\s+/g, " ")
     .trim();
@@ -72,19 +58,23 @@ function pickDeterministicPosition(topic) {
 
 function getAntSceneInstructions(topic) {
   const rawTopic = String(topic || "").toLowerCase();
-  const cleanTopic = stripNoiseWords(sanitizeTopic(topic)) || "software engineering";
+  const cleanTopic = stripNoiseWords(topic) || "software engineering";
 
   if (/(bug|loi|lỗi|fix|debug|error)/i.test(rawTopic)) {
     return {
       antAction:
         "sitting on the desk, looking confused at the laptop screen, scratching its head with a tiny hand",
-      consoleLog: 'console.error("Bug found: Unexpected behavior...");',
+      consoleLog: `console.error("Bug found in ${cleanTopic}...");`,
       emotion: "confused",
       cleanTopic,
     };
   }
 
-  if (/(bai 1|bài 1|moi bat dau|mới bắt đầu|newbie|co ban|cơ bản)/i.test(rawTopic)) {
+  if (
+    /(bai 1|bài 1|moi bat dau|mới bắt đầu|newbie|co ban|cơ bản|tutorial|learn)/i.test(
+      rawTopic
+    )
+  ) {
     return {
       antAction:
         "standing on a small stack of books, looking eager at the neon panel, holding a tiny pencil",
@@ -111,63 +101,127 @@ function getAntSceneInstructions(topic) {
   };
 }
 
-function buildDynamicNeonText(topic, emotion = "default") {
+function buildEnglishTitleHint(topic) {
+  const words = normalizeAscii(topic)
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((word) => word.toUpperCase());
+
+  if (words.length === 0) {
+    return "WEB DEV INSIGHT";
+  }
+
+  return words.join(" ");
+}
+
+function resolveImageInput(input) {
+  if (typeof input === "string") {
+    return {
+      topic: input,
+      imageShortTitle: "",
+      antAction: "",
+      logMessage: "",
+    };
+  }
+
+  return {
+    topic: String(input?.topic || input?.post_content || "").trim(),
+    imageShortTitle: String(input?.image_short_title || input?.imageShortTitle || "").trim(),
+    antAction: String(input?.ant_action || input?.antAction || "").trim(),
+    logMessage: String(input?.log_message || input?.logMessage || "").trim(),
+  };
+}
+
+function sanitizeEnglishTitle(value, fallback) {
+  const normalized = normalizeAscii(value)
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  return normalized
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(" ");
+}
+
+function buildImagePrompt(topicOrPayload, emotion = "default") {
+  const input = resolveImageInput(topicOrPayload);
+  const topic = input.topic || "web development topic";
   const scene = getAntSceneInstructions(topic);
   const sceneEmotion = emotion === "default" ? scene.emotion : emotion;
+  const rawTopic = sanitizeTopic(topic) || "web development topic";
+  const hintTitle = buildEnglishTitleHint(topic);
+  const panelTitle = sanitizeEnglishTitle(input.imageShortTitle, hintTitle);
+  const antAction = input.antAction || scene.antAction;
+  const logMessage = input.logMessage || scene.consoleLog;
 
-  return (
-    `${getAntEmotionPrompt(sceneEmotion)} ` +
-    `On the large cyan neon panel behind the ant, only replace the Vietnamese text with: ` +
-    `'Moi anh em cung "tham" ve ${scene.cleanTopic} cho anh em newbie'. ` +
-    `Set the small console text to: ${scene.consoleLog} ` +
-    `The ant action should be: ${scene.antAction}. ` +
-    "Unobstructed view of all original elements (icons, the little coder logo, the ant)."
-  );
+  return `
+A professional minimalist 3D technology render for a blog banner.
+STRICT LAYOUT (Ref. image_42.png composition):
+- Scene: Centered perspective of a deeply dark room (#111111).
+- Table: A sleek matte black desk with subtle cyan neon light edges.
+- Foreground: A closed matte black laptop facing slightly away, displaying a clean centered teal logo/code: "the little coder".
+- Mascot: A stylized, small, low-poly 3D ant mascot with distinctive, flickering electric cyan antennae. Dynamic action: ${antAction}.
+- Background: A large, centered glowing cyan neon rectangle panel (chalkboard shape) with minimalist cyan mono font text.
+- Panel Icons: centered below the main text are small holographic icons: graduate cap, pencil, small plant.
+
+[CRITICAL DYNAMIC UPDATE]
+- Panel Main Text: Use ENGLISH ONLY. Create one VERY SHORT uppercase title (2-4 words) summarizing topic "${rawTopic}".
+- Preferred style examples: "MIDDLEWARE EXPLAINED", "REACT PROPS DEEP DIVE", "FIX BUGS FAST".
+- Use this exact short title on panel: "${panelTitle}".
+- Small Console Log (bottom-right): ${logMessage}
+- Do NOT use Vietnamese on the panel.
+- Keep panel text clear and unobstructed.
+
+Style: Cinematic tech-noir, sharp geometric edges, clean composition, 16:9 ratio.
+Guardrails: No watermark. No corner logos.
+Mood: ${getAntEmotionPrompt(sceneEmotion)}
+`
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function getGoogleApiKey() {
   return process.env.GOOGLE_API_KEY || process.env.GOOGLE_AI_KEY || "";
 }
 
-function buildMasterPrompt(topic, emotion = "default") {
-  const dynamicPart = buildDynamicNeonText(topic, emotion);
-  return `${THE_LITTLE_CODER_BASE_PROMPT}\n${dynamicPart}`
-    .replace(/\s+/g, " ")
-    .trim();
+function normalizeModelName(name) {
+  return String(name || "")
+    .trim()
+    .replace(/^models\//i, "");
 }
 
-function buildStrictReferencePrompt(topic, emotion = "default") {
-  const scene = getAntSceneInstructions(topic);
-  const sceneEmotion = emotion === "default" ? scene.emotion : emotion;
+function getImageModelCandidates() {
+  const primary = normalizeModelName(
+    process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image"
+  );
+  const extra = String(process.env.GEMINI_IMAGE_FALLBACK_MODELS || "")
+    .split(",")
+    .map((item) => normalizeModelName(item))
+    .filter(Boolean);
 
-  return `
-[STRICT INSTRUCTION - REFERENCE IMAGE ATTACHED]
-1. REPLICATE LAYOUT: Use the attached reference image as the absolute source of layout and visual identity.
-2. KEEP BRAND FIXED:
-   - Keep the same 3D ant mascot identity (low-poly body, cyan glowing antennae).
-   - The matte black laptop with glowing teal text "the little coder".
-   - Dark tech-noir room and centered cyan neon panel.
-   - Keep cinematic lighting and the same minimalist composition language.
-3. DYNAMIC UPDATE:
-   - Only replace the neon panel text with: "Moi anh em cung 'tham' ve ${scene.cleanTopic} cho newbie".
-   - Keep text centered, legible, cyan monospaced style.
-   - Update bottom-right console text to: ${scene.consoleLog}
-4. DYNAMIC ANT CHARACTER:
-   - Action and position: ${scene.antAction}
-   - The ant still faces the panel or laptop contextually and must remain clearly visible.
-   - The neon panel text must stay unobstructed.
-5. QUALITY: Professional 3D render, 16:9 ratio, high resolution.
-6. GUARDRAIL: Do not redesign brand identity. Do not replace mascot species. Do not add unrelated objects.
-7. ANT EMOTION: ${getAntEmotionPrompt(sceneEmotion)}
-`
-    .replace(/\s+/g, " ")
-    .trim();
+  return Array.from(
+    new Set([
+      primary,
+      "gemini-2.5-flash-image",
+      "gemini-3.1-flash-image-preview",
+      "gemini-3-pro-image-preview",
+      "gemini-2.5-flash",
+      ...extra,
+    ])
+  );
 }
 
 function resolveReferenceImagePath() {
   const configured = String(
-    process.env.GEMINI_REFERENCE_IMAGE_PATH ||
-      DEFAULT_REFERENCE_IMAGE_RELATIVE_PATH,
+    process.env.GEMINI_REFERENCE_IMAGE_PATH || DEFAULT_REFERENCE_IMAGE_RELATIVE_PATH
   ).trim();
   if (!configured) {
     return "";
@@ -225,43 +279,14 @@ function extractImagePart(response) {
   return parts.find((part) => part.inlineData || part.inline_data) || null;
 }
 
-function normalizeModelName(name) {
-  return String(name || "")
-    .trim()
-    .replace(/^models\//i, "");
-}
-
-function getImageModelCandidates() {
-  const primary = normalizeModelName(
-    process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image",
-  );
-  const extra = String(process.env.GEMINI_IMAGE_FALLBACK_MODELS || "")
-    .split(",")
-    .map((item) => normalizeModelName(item))
-    .filter(Boolean);
-
-  return Array.from(
-    new Set([
-      primary,
-      "gemini-2.5-flash-image",
-      "gemini-3.1-flash-image-preview",
-      "gemini-3-pro-image-preview",
-      "gemini-2.5-flash",
-      ...extra,
-    ]),
-  );
-}
-
 function buildFluxFallbackUrl(prompt, seed = null) {
-  const encoded = encodeURIComponent(
-    String(prompt || "")
-      .replace(/\s+/g, " ")
-      .trim(),
-  );
-  const value = Number.isInteger(seed)
-    ? seed
-    : Math.floor(Math.random() * 100000);
+  const encoded = encodeURIComponent(String(prompt || "").replace(/\s+/g, " ").trim());
+  const value = Number.isInteger(seed) ? seed : Math.floor(Math.random() * 100000);
   return `https://pollinations.ai/p/${encoded}?width=1280&height=720&model=flux&nologo=true&seed=${value}`;
+}
+
+function isTelegramSafePhotoMime(mimeType) {
+  return /^image\/(jpeg|jpg|png)$/i.test(String(mimeType || ""));
 }
 
 function getInlineFallbackAsset(prompt, reason) {
@@ -275,10 +300,6 @@ function getInlineFallbackAsset(prompt, reason) {
   };
 }
 
-function isTelegramSafePhotoMime(mimeType) {
-  return /^image\/(jpeg|jpg|png)$/i.test(String(mimeType || ""));
-}
-
 async function callGeminiForImage(prompt, options = {}) {
   const apiKey = getGoogleApiKey();
   if (!apiKey) {
@@ -288,12 +309,10 @@ async function callGeminiForImage(prompt, options = {}) {
   const genAI = new GoogleGenerativeAI(apiKey);
   const models = getImageModelCandidates();
   const includeReferenceImage = Boolean(options.includeReferenceImage);
-  const referenceImagePart = includeReferenceImage
-    ? getReferenceImagePart()
-    : null;
+  const referenceImagePart = includeReferenceImage ? getReferenceImagePart() : null;
   if (includeReferenceImage && !referenceImagePart) {
     console.warn(
-      `[image.service] Reference image not found at "${resolveReferenceImagePath()}". Fallback to prompt-only mode.`,
+      `[image.service] Reference image not found at "${resolveReferenceImagePath()}". Fallback to prompt-only mode.`
     );
   }
 
@@ -301,9 +320,7 @@ async function callGeminiForImage(prompt, options = {}) {
   for (const modelName of models) {
     try {
       const model = genAI.getGenerativeModel({ model: modelName });
-      const requestPayload = referenceImagePart
-        ? [referenceImagePart, { text: prompt }]
-        : prompt;
+      const requestPayload = referenceImagePart ? [referenceImagePart, { text: prompt }] : prompt;
       const result = await model.generateContent(requestPayload);
       const response = await result.response;
       return { response, modelName };
@@ -313,7 +330,9 @@ async function callGeminiForImage(prompt, options = {}) {
       const retryableModelError =
         msg.includes("not found") ||
         msg.includes("not supported") ||
-        msg.includes("404");
+        msg.includes("404") ||
+        msg.includes("429") ||
+        msg.includes("quota");
       if (retryableModelError) {
         continue;
       }
@@ -325,14 +344,8 @@ async function callGeminiForImage(prompt, options = {}) {
 }
 
 async function generateImageAsset(topic, emotion = "default") {
+  const prompt = buildImagePrompt(topic, emotion);
   try {
-    const prompt =
-      `${buildMasterPrompt(topic, emotion)} ${buildStrictReferencePrompt(
-        topic,
-        emotion,
-      )}`
-        .replace(/\s+/g, " ")
-        .trim();
     const { response, modelName } = await callGeminiForImage(prompt, {
       includeReferenceImage: true,
     });
@@ -342,11 +355,7 @@ async function generateImageAsset(topic, emotion = "default") {
       const inline = imagePart.inlineData || imagePart.inline_data;
       if (inline?.data) {
         const mimeType = inline.mimeType || inline.mime_type || "image/png";
-        if (!isTelegramSafePhotoMime(mimeType)) {
-          console.warn(
-            `[image.service] Unsupported inline mime for Telegram photo: ${mimeType}`,
-          );
-        } else {
+        if (isTelegramSafePhotoMime(mimeType)) {
           return {
             type: "buffer",
             buffer: Buffer.from(inline.data, "base64"),
@@ -360,32 +369,17 @@ async function generateImageAsset(topic, emotion = "default") {
 
     const text =
       response?.text?.() ||
-      response?.candidates?.[0]?.content?.parts
-        ?.map((part) => part.text || "")
-        .join(" ") ||
+      response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join(" ") ||
       "";
     const url = extractUrlFromText(text);
     if (url) {
       try {
         const { buffer, mimeType } = await downloadImageBuffer(url, true);
         if (isTelegramSafePhotoMime(mimeType)) {
-          return {
-            type: "buffer",
-            buffer,
-            mimeType,
-            model: modelName,
-            prompt,
-            sourceUrl: url,
-          };
+          return { type: "buffer", buffer, mimeType, model: modelName, prompt, sourceUrl: url };
         }
-        return {
-          type: "url",
-          url,
-          model: modelName,
-          prompt,
-          fallbackReason: `unsafe-mime:${mimeType}`,
-        };
-      } catch (downloadError) {
+        return { type: "url", url, model: modelName, prompt };
+      } catch (_downloadError) {
         return { type: "url", url, model: modelName, prompt };
       }
     }
@@ -393,55 +387,45 @@ async function generateImageAsset(topic, emotion = "default") {
     const fluxUrl = buildFluxFallbackUrl(prompt);
     try {
       const { buffer, mimeType } = await downloadImageBuffer(fluxUrl, true);
-      if (!isTelegramSafePhotoMime(mimeType)) {
+      if (isTelegramSafePhotoMime(mimeType)) {
         return {
-          type: "url",
-          url: fluxUrl,
+          type: "buffer",
+          buffer,
+          mimeType,
           prompt,
           isFallback: true,
-          fallbackReason: `flux-unsafe-mime:${mimeType}`,
+          fallbackReason: "flux-url-fallback",
+          sourceUrl: fluxUrl,
         };
       }
-      return {
-        type: "buffer",
-        buffer,
-        mimeType,
-        prompt,
-        isFallback: true,
-        fallbackReason: "flux-url-fallback",
-        sourceUrl: fluxUrl,
-      };
-    } catch (fluxError) {
+      return { type: "url", url: fluxUrl, prompt, isFallback: true };
+    } catch (_fluxError) {
       return getInlineFallbackAsset(prompt, "flux-download-failed");
     }
   } catch (error) {
-    console.error(
-      "[image.service] Google image generation error:",
-      error.message,
-    );
-    const prompt = buildMasterPrompt(topic, emotion);
+    console.error("[image.service] Google image generation error:", error.message);
     const fluxUrl = buildFluxFallbackUrl(prompt);
     try {
       const { buffer, mimeType } = await downloadImageBuffer(fluxUrl, true);
-      if (!isTelegramSafePhotoMime(mimeType)) {
+      if (isTelegramSafePhotoMime(mimeType)) {
         return {
-          type: "url",
-          url: fluxUrl,
+          type: "buffer",
+          buffer,
+          mimeType,
           isFallback: true,
-          fallbackReason: `google-failed-flux-unsafe-mime:${mimeType}`,
+          fallbackReason: "google-failed-flux-success",
           error: error.message,
           prompt,
+          sourceUrl: fluxUrl,
         };
       }
       return {
-        type: "buffer",
-        buffer,
-        mimeType,
+        type: "url",
+        url: fluxUrl,
         isFallback: true,
-        fallbackReason: "google-failed-flux-success",
+        fallbackReason: "google-failed-flux-url",
         error: error.message,
         prompt,
-        sourceUrl: fluxUrl,
       };
     } catch (_fluxError) {
       return getInlineFallbackAsset(prompt, "google-failed-inline-fallback");
@@ -459,13 +443,19 @@ async function generateImageUrl(topic, emotion = "default") {
     return `data:${asset.mimeType || "image/png"};base64,${asset.buffer.toString("base64")}`;
   }
 
-  return buildFluxFallbackUrl(buildMasterPrompt(topic, emotion));
+  return buildFluxFallbackUrl(buildImagePrompt(topic, emotion));
 }
 
 async function generateImageUrlFromPrompt(promptText, options = {}) {
+  const prompt = String(promptText || "").trim();
+  if (!prompt) {
+    return buildFluxFallbackUrl("minimalist tech banner");
+  }
+
   try {
-    const prompt = String(promptText || "");
-    const { response } = await callGeminiForImage(prompt);
+    const { response } = await callGeminiForImage(prompt, {
+      includeReferenceImage: Boolean(options.includeReferenceImage),
+    });
     const imagePart = extractImagePart(response);
 
     if (imagePart) {
@@ -477,9 +467,7 @@ async function generateImageUrlFromPrompt(promptText, options = {}) {
 
     const text =
       response?.text?.() ||
-      response?.candidates?.[0]?.content?.parts
-        ?.map((part) => part.text || "")
-        .join(" ") ||
+      response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join(" ") ||
       "";
     const url = extractUrlFromText(text);
     if (url) {
@@ -487,11 +475,8 @@ async function generateImageUrlFromPrompt(promptText, options = {}) {
     }
     return buildFluxFallbackUrl(prompt, options.seed);
   } catch (error) {
-    console.error(
-      "[image.service] generateImageUrlFromPrompt error:",
-      error.message,
-    );
-    return buildFluxFallbackUrl(String(promptText || ""), options.seed);
+    console.error("[image.service] generateImageUrlFromPrompt error:", error.message);
+    return buildFluxFallbackUrl(prompt, options.seed);
   }
 }
 
@@ -510,9 +495,7 @@ async function downloadImageBuffer(imageUrl, withMeta = false) {
 
   const contentType = String(response.headers?.["content-type"] || "");
   if (!contentType.startsWith("image/")) {
-    throw new Error(
-      `Invalid content-type for image: ${contentType || "unknown"}`,
-    );
+    throw new Error(`Invalid content-type for image: ${contentType || "unknown"}`);
   }
 
   const buffer = Buffer.from(response.data);

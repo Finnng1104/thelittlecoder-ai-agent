@@ -4,11 +4,51 @@ const { MY_PAST_POSTS } = require("../constants/my_style");
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const FALLBACK_MODEL = "openrouter/auto";
+const OPENROUTER_DEFAULT_MODEL = "deepseek/deepseek-r1";
+const OPENROUTER_RETRY_MODELS = [
+  "deepseek/deepseek-r1",
+  "deepseek/deepseek-chat",
+  "meta-llama/llama-3.1-70b-instruct",
+  "openrouter/auto",
+];
+const OPENROUTER_FREE_RETRY_MODELS = [
+  "deepseek/deepseek-r1:free",
+  "deepseek/deepseek-chat:free",
+];
 
 const DEFAULT_SYSTEM_PROMPT =
-  "Bạn là trợ lý AI thông minh của Tiến (The Little Coder). Trả lời ngắn gọn, có tâm và đậm chất Developer.";
+  'Bạn là "The Little Coder" - trợ lý kỹ thuật của Tiến. Trả lời ngắn gọn, rõ ràng, thực dụng.';
+
+const THE_LITTLE_CODER_ENGINE_V2_JSON = `
+[ROLE]
+Bạn là "The Little Coder" - một Junior Frontend Developer tại Việt Nam. Giọng văn thân thiện, "anh em", khiêm tốn nhưng chuyên nghiệp.
+
+[LANGUAGE RULES - CRITICAL]
+1. 100% TIẾNG VIỆT THUẦN TÚY: Tuyệt đối không sử dụng chữ Hán (探讨, 真的, 依赖).
+2. THUẬT NGỮ CHUYÊN NGÀNH: Giữ nguyên tiếng Anh (Middleware, Props, State...).
+
+[FACEBOOK UI/UX FORMATTING RULES]
+1. TIÊU ĐỀ: Phải VIẾT HOA TOÀN BỘ và bắt đầu bằng Emoji (Ví dụ: 🚀 TIÊU ĐỀ).
+2. TUYỆT ĐỐI KHÔNG DÙNG BOLD: Không sử dụng dấu ** hoặc __ trong bất kỳ hoàn cảnh nào. Viết văn bản trơn hoàn toàn.
+3. NHẤN MẠNH: Sử dụng VIẾT HOA cho các từ khóa thực sự quan trọng. Dùng Emoji ở đầu dòng làm điểm neo.
+4. DANH SÁCH & KHOẢNG TRẮNG: Dùng số 1️⃣, 2️⃣ hoặc icon ✅. Ngắt 2 dòng giữa các đoạn văn.
+
+[OUTPUT FORMAT - REQUIRED JSON]
+Bạn PHẢI trả về kết quả dưới định dạng JSON duy nhất, không có văn bản thừa bên ngoài:
+{
+  "post_content": "Nội dung bài viết Facebook (văn bản trơn, VIẾT HOA từ khóa cần nhấn mạnh, không có dấu **)",
+  "image_short_title": "Tiêu đề tiếng Anh ngắn gọn cho ảnh (Ví dụ: REACT PROPS)",
+  "ant_action": "Mô tả hành động con kiến (Ví dụ: sitting confusedly, celebrating)",
+  "log_message": "Dòng chữ cho console.log trên ảnh (Ví dụ: Learning React...)"
+}
+
+LƯU Ý: Tuyệt đối không hiển thị phần mô tả "Image Prompt" hay bất kỳ dòng giải thích nào khác ngoài JSON.
+`.trim();
 
 const DEEP_RESEARCH_PROMPT = `
+${THE_LITTLE_CODER_ENGINE_V2_JSON}
+
+[PERSONAL CONTEXT]
 Bạn là Nguyễn Thanh Tiến (The Little Coder), một Junior Software Engineer tại SR Labs, Runner-up FPT Hackathon 2025.
 Bạn viết blog để chia sẻ hành trình từ một "Little Coder" tiến tới Middle-level.
 
@@ -28,14 +68,16 @@ NHIỆM VỤ:
 1. Viết bài mới dựa trên dữ liệu research nhưng phải giữ đúng phong cách trong các bài mẫu.
 2. Tuyệt đối không lộ ra mình là AI.
 3. Giữ cấu trúc: Câu mở đầu gây chú ý -> Phân tích thực chiến -> Câu hỏi thảo luận.
+4. Tuân thủ chặt output JSON ở trên.
 `.trim();
 
 const IMAGE_PROMPT_SYSTEM = `
 You are a senior prompt engineer for The Little Coder visual identity.
-Return only one final English image prompt for Flux.
+Return only one final English image prompt for Flux/Imagen.
 Requirements:
 - Keep fixed layout: dark room, black desk, cyan neon panel, ant mascot behind laptop, laptop text "the little coder".
-- Preserve readability of neon text.
+- Panel text must be English only, very short uppercase title (2-4 words), no Vietnamese on panel.
+- Match ant pose with topic mood (bug => confused, tutorial/success => celebrating).
 - No markdown, no explanation, no numbered list.
 `.trim();
 
@@ -44,57 +86,206 @@ const FALLBACK_IMAGE_PROMPT =
   "small stylized ant mascot behind laptop with cyan glowing antennae, unobstructed cyan neon panel, " +
   "cinematic lighting, sharp focus, isometric tech style, no extra text outside panel.";
 
+function normalizeOpenRouterModel(modelId) {
+  const raw = String(modelId || "").trim();
+  if (!raw) {
+    return OPENROUTER_DEFAULT_MODEL;
+  }
+
+  // Tu dong map model cu da deprecated sang alias ben.
+  if (/deepseek-r1-distill-llama-70b/i.test(raw)) {
+    return OPENROUTER_DEFAULT_MODEL;
+  }
+
+  return raw;
+}
+
+function isFreeModel(modelId) {
+  return /:free(?:$|[\s/])/i.test(String(modelId || "").trim());
+}
+
+function parseBooleanEnv(value, defaultValue = false) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) {
+    return defaultValue;
+  }
+  return ["1", "true", "yes", "on"].includes(raw);
+}
+
+function allowPaidFallback(primaryModel, options = {}) {
+  if (typeof options.allowPaidFallback === "boolean") {
+    return options.allowPaidFallback;
+  }
+
+  if (isFreeModel(primaryModel)) {
+    return parseBooleanEnv(process.env.OPENROUTER_ALLOW_PAID_FALLBACK, false);
+  }
+
+  return true;
+}
+
+function buildModelQueue(primaryModel, options = {}) {
+  const explicit = Array.isArray(options.retryModels) ? options.retryModels : [];
+  const envExtra = String(process.env.OPENROUTER_RETRY_MODELS || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const normalizedPrimary = normalizeOpenRouterModel(primaryModel);
+  const paidFallbackEnabled = allowPaidFallback(normalizedPrimary, options);
+  const defaultRetryModels = paidFallbackEnabled
+    ? OPENROUTER_RETRY_MODELS
+    : OPENROUTER_FREE_RETRY_MODELS;
+
+  const queue = Array.from(
+    new Set([
+      normalizedPrimary,
+      ...explicit.map((m) => normalizeOpenRouterModel(m)),
+      ...envExtra.map((m) => normalizeOpenRouterModel(m)),
+      ...defaultRetryModels,
+      ...(paidFallbackEnabled ? [FALLBACK_MODEL] : []),
+    ])
+  );
+
+  if (paidFallbackEnabled) {
+    return queue;
+  }
+
+  if (!isFreeModel(normalizedPrimary)) {
+    return [normalizedPrimary];
+  }
+
+  const freeOnlyQueue = queue.filter((modelId) => isFreeModel(modelId));
+  if (freeOnlyQueue.length > 0) {
+    return freeOnlyQueue;
+  }
+
+  return [normalizedPrimary];
+}
+
+function shouldRetryWithAnotherModel(error) {
+  const status = Number(error?.response?.status || error?.response?.data?.error?.code || 0);
+  const message = String(
+    error?.response?.data?.error?.metadata?.raw ||
+      error?.response?.data?.error?.message ||
+      error?.message ||
+      ""
+  ).toLowerCase();
+
+  return (
+    status === 410 ||
+    message.includes("not available") ||
+    message.includes("deprecated") ||
+    message.includes("provider returned error") ||
+    message.includes("not a valid model id") ||
+    message.includes("model") && message.includes("not found")
+  );
+}
+
+function buildRequestPayload(modelId, question, systemPrompt, temperature, options = {}) {
+  const maxTokens = Number(
+    options.maxTokens ??
+      options.max_tokens ??
+      process.env.AI_MAX_TOKENS ??
+      process.env.OPENROUTER_MAX_TOKENS ??
+      1500
+  );
+
+  const payload = {
+    model: modelId,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: question },
+    ],
+    temperature,
+  };
+
+  if (Number.isFinite(maxTokens) && maxTokens > 0) {
+    payload.max_tokens = Math.floor(maxTokens);
+  }
+
+  const transforms = options.transforms || process.env.OPENROUTER_TRANSFORMS || "middleman";
+  const transformList = String(transforms)
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (transformList.length > 0) {
+    payload.transforms = transformList;
+  }
+
+  return payload;
+}
+
 async function askAI(question, options = {}) {
   try {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error("Missing OPENROUTER_API_KEY");
 
-    // Ưu tiên model từ options/env, nếu lỗi model sẽ tự fallback sang openrouter/auto
-    const model =
-      options.model ||
+    const configuredModel =
+      process.env.AI_MODEL ||
       process.env.OPENROUTER_MODEL ||
-      "deepseek/deepseek-r1-distill-llama-70b";
+      OPENROUTER_DEFAULT_MODEL;
+    const model = normalizeOpenRouterModel(options.model || configuredModel);
     const systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     const temperature = options.temperature ?? 0.6;
     const timeout = options.timeout ?? 300000;
-
-    const requestPayload = (modelId) => ({
-      model: modelId,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: question },
-      ],
-      temperature,
-    });
+    const modelQueue = buildModelQueue(model, options);
+    const siteUrl = process.env.OPENROUTER_SITE_URL || "https://thelittlecoder.com";
+    const appName = process.env.OPENROUTER_APP_NAME || "The Little Coder Bot";
 
     const requestConfig = {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
+        "HTTP-Referer": siteUrl,
+        "X-Title": appName,
       },
       timeout,
     };
 
-    let response;
-    try {
-      response = await axios.post(OPENROUTER_URL, requestPayload(model), requestConfig);
-    } catch (error) {
-      const message = String(error.response?.data?.error?.message || error.message || "");
-      const shouldFallback =
-        message.includes("not a valid model ID") && model !== FALLBACK_MODEL;
+    let response = null;
+    let lastError = null;
 
-      if (!shouldFallback) {
-        throw error;
+    for (const candidateModel of modelQueue) {
+      try {
+        response = await axios.post(
+          OPENROUTER_URL,
+          buildRequestPayload(candidateModel, question, systemPrompt, temperature, options),
+          requestConfig
+        );
+        break;
+      } catch (error) {
+        lastError = error;
+        // Neu transform gây loi, thu lai khong transform 1 lan cho model hien tai.
+        const transformMessage = String(error?.response?.data?.error?.message || "").toLowerCase();
+        const transformFailed = transformMessage.includes("transform");
+        if (transformFailed) {
+          try {
+            response = await axios.post(
+              OPENROUTER_URL,
+              buildRequestPayload(candidateModel, question, systemPrompt, temperature, {
+                ...options,
+                transforms: "",
+              }),
+              requestConfig
+            );
+            break;
+          } catch (retryError) {
+            lastError = retryError;
+          }
+        }
+
+        if (!shouldRetryWithAnotherModel(error)) {
+          throw error;
+        }
+
+        console.warn(
+          `[ai.service] Model "${candidateModel}" unavailable, retrying with another provider/model...`
+        );
       }
+    }
 
-      console.warn(
-        `[ai.service] Invalid model "${model}", retrying with fallback "${FALLBACK_MODEL}"`
-      );
-      response = await axios.post(
-        OPENROUTER_URL,
-        requestPayload(FALLBACK_MODEL),
-        requestConfig
-      );
+    if (!response) {
+      throw lastError || new Error("OpenRouter request failed without response");
     }
 
     let content = response.data.choices?.[0]?.message?.content || "";

@@ -7,9 +7,11 @@ const {
   downloadImageBuffer,
 } = require("./src/services/image.service");
 const { postToFacebook, deleteFacebookPost } = require("./src/services/facebook.service");
+const { formatForFacebook } = require("./src/utils/textFormatter");
 
 const telegramToken = process.env.TELEGRAM_TOKEN;
 const draftStore = new Map();
+const publishedPostStore = new Map();
 const TELEGRAM_CAPTION_MAX = 1024;
 const TELEGRAM_MESSAGE_SAFE_LIMIT = 3800;
 
@@ -29,6 +31,68 @@ function buildDraftKeyboard() {
     [Markup.button.callback("Doi anh khac", "regen_image")],
     [Markup.button.callback("Bo qua ban thao", "cancel_post")],
   ]);
+}
+
+function rememberPublishedPost(chatId, postId) {
+  const id = String(postId || "").trim();
+  if (!id) {
+    return;
+  }
+
+  const current = publishedPostStore.get(chatId) || { ids: [] };
+  const ids = [id, ...(current.ids || []).filter((item) => item !== id)].slice(0, 20);
+  publishedPostStore.set(chatId, {
+    ids,
+    lastPostId: ids[0],
+    updatedAt: Date.now(),
+  });
+}
+
+function forgetPublishedPost(chatId, postId) {
+  const id = String(postId || "").trim();
+  if (!id) {
+    return;
+  }
+
+  const current = publishedPostStore.get(chatId);
+  if (!current) {
+    return;
+  }
+
+  const ids = (current.ids || []).filter((item) => item !== id);
+  if (ids.length === 0) {
+    publishedPostStore.delete(chatId);
+    return;
+  }
+
+  publishedPostStore.set(chatId, {
+    ...current,
+    ids,
+    lastPostId: ids[0],
+    updatedAt: Date.now(),
+  });
+}
+
+function getLastPublishedPostId(chatId) {
+  return String(publishedPostStore.get(chatId)?.lastPostId || "").trim();
+}
+
+function extractDeleteCommandArg(text) {
+  const normalizedText = String(text || "")
+    .replace(/`/g, "")
+    .replace(/\u200b/g, "")
+    .trim();
+  const matched = normalizedText.match(/^\/delete(?:@\w+)?(?:\s+(.+))?$/i);
+  if (!matched) {
+    return null;
+  }
+
+  const rawArg = String(matched[1] || "").trim();
+  if (!rawArg) {
+    return "";
+  }
+
+  return rawArg.split(/\s+/)[0].trim();
 }
 
 function toCaption(postText) {
@@ -76,6 +140,90 @@ function splitLongText(text, limit = TELEGRAM_MESSAGE_SAFE_LIMIT) {
   }
 
   return chunks;
+}
+
+function buildFallbackShortTitle(topic) {
+  const words = String(topic || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s-]/g, " ")
+    .toUpperCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 4);
+
+  if (words.length === 0) {
+    return "WEB DEV INSIGHT";
+  }
+
+  return words.join(" ");
+}
+
+function extractFirstJsonObject(rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch?.[1]) {
+    try {
+      return JSON.parse(fenceMatch[1]);
+    } catch (_error) {
+      // Fall through.
+    }
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    // Try object slice below.
+  }
+
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    const candidate = text.slice(first, last + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function parseStructuredAiOutput(rawText, topic) {
+  const parsed = extractFirstJsonObject(rawText);
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("AI tra ve khong dung dinh dang JSON bat buoc.");
+  }
+
+  const structured = {
+    post_content: String(parsed.post_content || "").trim(),
+    image_short_title: String(parsed.image_short_title || "").trim(),
+    ant_action: String(parsed.ant_action || "").trim(),
+    log_message: String(parsed.log_message || "").trim(),
+  };
+
+  if (!structured.post_content) {
+    throw new Error("JSON thieu truong post_content.");
+  }
+
+  if (!structured.image_short_title) {
+    structured.image_short_title = buildFallbackShortTitle(topic);
+  }
+
+  if (!structured.ant_action) {
+    structured.ant_action = "standing behind laptop";
+  }
+
+  if (!structured.log_message) {
+    structured.log_message = `Learning ${buildFallbackShortTitle(topic)}...`;
+  }
+
+  return structured;
 }
 
 function isTelegramPhotoMime(mimeType) {
@@ -170,6 +318,32 @@ async function updateStatus(ctx, statusMessage, text) {
   }
 }
 
+async function runDeletePostFlow(ctx, inputPostId = "") {
+  const chatId = String(ctx.chat.id);
+  if (chatId !== ownerChatId()) {
+    return;
+  }
+
+  const explicitId = String(inputPostId || "").trim();
+  const postId = explicitId || getLastPublishedPostId(chatId);
+
+  if (!postId) {
+    await ctx.reply(
+      "Chua co ID de xoa. Dung: /delete <post_id> hoac dang bai moi roi /delete."
+    );
+    return;
+  }
+
+  const statusMsg = await ctx.reply(`Dang yeu cau Facebook go bai: ${postId}...`);
+  try {
+    await deleteFacebookPost(postId);
+    forgetPublishedPost(chatId, postId);
+    await updateStatus(ctx, statusMsg, "Da xoa bai viet thanh cong khoi Fanpage.");
+  } catch (error) {
+    await updateStatus(ctx, statusMsg, `Xoa that bai: ${error.message}`);
+  }
+}
+
 bot.start((ctx) => {
   ctx.reply(
     "Chao Tien! Toi da san sang research, viet bai va tao banner."
@@ -183,26 +357,8 @@ bot.help((ctx) => {
 });
 
 bot.command("delete", async (ctx) => {
-  if (String(ctx.chat.id) !== ownerChatId()) {
-    return;
-  }
-
-  const text = ctx.message?.text || "";
-  const postId = text.replace(/^\/delete(@\w+)?\s*/i, "").trim();
-
-  if (!postId) {
-    await ctx.reply("Tien chua nhap ID bai viet. Vi du: /delete 123456789");
-    return;
-  }
-
-  const statusMsg = await ctx.reply(`Dang yeu cau Facebook go bai: ${postId}...`);
-
-  try {
-    await deleteFacebookPost(postId);
-    await updateStatus(ctx, statusMsg, "Da xoa bai viet thanh cong khoi Fanpage.");
-  } catch (error) {
-    await updateStatus(ctx, statusMsg, `Xoa that bai: ${error.message}`);
-  }
+  const postId = extractDeleteCommandArg(ctx.message?.text || "") || "";
+  await runDeletePostFlow(ctx, postId);
 });
 
 bot.on("text", async (ctx) => {
@@ -211,6 +367,12 @@ bot.on("text", async (ctx) => {
 
   if (chatId !== ownerChatId()) {
     console.log(`[bot] Warning: stranger message from chat ID ${chatId}`);
+    return;
+  }
+
+  const deleteArg = extractDeleteCommandArg(userText);
+  if (deleteArg !== null) {
+    await runDeletePostFlow(ctx, deleteArg);
     return;
   }
 
@@ -233,18 +395,21 @@ bot.on("text", async (ctx) => {
       await updateStatus(
         ctx,
         statusMsg,
-        `[2/4] Da quet ${research.totalResults} nguon. Dang phan tich va viet ban nhap theo style cua Tien...`
+        `[2/4] Da quet ${research.totalResults} nguon. Dang viet bai va tạo JSON theo hiep phap content...`
       );
 
-      const draft1 = await askAI(
+      const structuredRaw = await askAI(
         `Du lieu research goc:\n${research.infoText}\n\n` +
           `Chu de goc: ${topic}\n` +
           `Tu khoa tim kiem tieng Anh: ${research.query}\n\n` +
-          "Hay viet ban nhap bai dang Facebook cho The Little Coder.",
+          "Hay tao output JSON dung schema yeu cau. Khong tra ve markdown, khong loi giai thich.",
         {
           systemPrompt: DEEP_RESEARCH_PROMPT,
-          model: process.env.OPENROUTER_DEEP_MODEL || process.env.OPENROUTER_MODEL,
-          temperature: 0.45,
+          model:
+            process.env.AI_MODEL ||
+            process.env.OPENROUTER_DEEP_MODEL ||
+            process.env.OPENROUTER_MODEL,
+          temperature: 0.35,
           timeout: 300000,
           throwOnError: true,
         }
@@ -253,20 +418,17 @@ bot.on("text", async (ctx) => {
       await updateStatus(
         ctx,
         statusMsg,
-        "[3/4] Dang tu phan bien va tinh chinh de loai bo van mau AI..."
+        "[3/4] Dang parse JSON va don dep noi dung Facebook..."
       );
 
-      const finalPost = await askAI(
-        `Day la bai ban vua viet:\n${draft1}\n\n` +
-          "Hay chinh lai theo style The Little Coder: tu nhien, thuc chien, bo cac cum sao rong, giu giong ke chuyen cua mot ky su dang lam that.",
-        {
-          systemPrompt: DEEP_RESEARCH_PROMPT,
-          model: process.env.OPENROUTER_DEEP_MODEL || process.env.OPENROUTER_MODEL,
-          temperature: 0.4,
-          timeout: 300000,
-          throwOnError: true,
-        }
-      );
+      const structured = parseStructuredAiOutput(structuredRaw, topic);
+      const finalPost = formatForFacebook(structured.post_content);
+      const imageMeta = {
+        topic,
+        image_short_title: structured.image_short_title,
+        ant_action: structured.ant_action,
+        log_message: structured.log_message,
+      };
 
       await updateStatus(
         ctx,
@@ -274,10 +436,11 @@ bot.on("text", async (ctx) => {
         "[4/4] Gemini dang tao banner theo bo cuc The Little Coder..."
       );
 
-      const imageAsset = await generateImageAsset(topic, "default");
+      const imageAsset = await generateImageAsset(imageMeta, "default");
       draftStore.set(chatId, {
         postText: finalPost,
         topic,
+        imageMeta,
         imageAsset,
         imageUrl: imageAsset?.url || null,
       });
@@ -301,6 +464,11 @@ bot.on("text", async (ctx) => {
       );
     }
 
+    return;
+  }
+
+  if (userText.startsWith("/")) {
+    await ctx.reply("Lenh khong hop le. Dung /help de xem lenh ho tro.");
     return;
   }
 
@@ -338,7 +506,7 @@ bot.action("regen_image", async (ctx) => {
 
   await ctx.answerCbQuery("Dang tao anh moi...");
 
-  const newImageAsset = await generateImageAsset(draft.topic, "default");
+  const newImageAsset = await generateImageAsset(draft.imageMeta || draft.topic, "default");
   const updatedDraft = {
     ...draft,
     imageAsset: newImageAsset,
@@ -379,6 +547,7 @@ bot.action("confirm_post", async (ctx) => {
       draft.postText,
       draft.imageAsset || draft.imageUrl || null
     );
+    rememberPublishedPost(chatId, fbPostId);
     draftStore.delete(chatId);
 
     try {

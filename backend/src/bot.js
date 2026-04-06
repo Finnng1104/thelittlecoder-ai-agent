@@ -12,12 +12,12 @@ function startTelegramBot() {
 
   bot.start((ctx) =>
     ctx.reply(
-      "Chao ban, minh la The Little Coder AI Bot. Gui /help de xem cac lenh co san."
-    )
+      "Chào bạn, mình là The Little Coder AI Bot. Gửi /help để xem các lệnh có sẵn nhé!",
+    ),
   );
 
   bot.help((ctx) => {
-    ctx.reply("Lenh hien tai: /start, /help");
+    ctx.reply("Lệnh đang có hiện tại: /start, /help");
   });
 
   bot.launch().then(() => {

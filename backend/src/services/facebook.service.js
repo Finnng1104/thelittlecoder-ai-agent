@@ -1,5 +1,6 @@
 const axios = require("axios");
 const FormData = require("form-data");
+const { formatForFacebook } = require("../utils/textFormatter");
 
 function getFacebookCredentials() {
   const pageId = process.env.FB_PAGE_ID || process.env.FACEBOOK_PAGE_ID;
@@ -38,10 +39,15 @@ function normalizeImageInput(imageInput) {
   return { mode: "none" };
 }
 
+function prepareContentForFacebook(rawText) {
+  return formatForFacebook(rawText);
+}
+
 async function postToFacebook(message, imageInput = null) {
   try {
     const { pageId, pageToken } = getFacebookCredentials();
     const normalized = normalizeImageInput(imageInput);
+    const cleanMessage = prepareContentForFacebook(message);
 
     if (normalized.mode === "buffer") {
       const form = new FormData();
@@ -49,7 +55,7 @@ async function postToFacebook(message, imageInput = null) {
         filename: "cover.png",
         contentType: normalized.mimeType,
       });
-      form.append("caption", message);
+      form.append("caption", cleanMessage);
       form.append("access_token", pageToken);
 
       const response = await axios.post(
@@ -66,14 +72,14 @@ async function postToFacebook(message, imageInput = null) {
     if (normalized.mode === "url") {
       const response = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/photos`, {
         url: normalized.url,
-        caption: message,
+        caption: cleanMessage,
         access_token: pageToken,
       });
       return response.data.post_id || response.data.id;
     }
 
     const response = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/feed`, {
-      message,
+      message: cleanMessage,
       access_token: pageToken,
     });
     return response.data.post_id || response.data.id;
@@ -105,6 +111,7 @@ async function postPhotoToFacebook(message, imageUrl) {
 }
 
 module.exports = {
+  prepareContentForFacebook,
   postToFacebook,
   deleteFacebookPost,
   publishToFacebook,
