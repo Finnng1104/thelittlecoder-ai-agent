@@ -31,9 +31,9 @@ function ownerChatId() {
 
 function buildDraftKeyboard() {
   return Markup.inlineKeyboard([
-    [Markup.button.callback("Duyet & Dang bai", "confirm_post")],
-    [Markup.button.callback("Doi anh khac", "regen_image")],
-    [Markup.button.callback("Bo qua ban thao", "cancel_post")],
+    [Markup.button.callback("Duyệt & Đăng bài", "confirm_post")],
+    [Markup.button.callback("Đổi ảnh khác", "regen_image")],
+    [Markup.button.callback("Bỏ qua bản thảo", "cancel_post")],
   ]);
 }
 
@@ -132,12 +132,12 @@ function buildTopicFromRawContent(rawContent) {
 }
 
 function toCaption(postText) {
-  const fullCaption = `BAN THAO CHAT LUONG CAO:\n\n${postText}`;
+  const fullCaption = `BẢN THẢO CHẤT LƯỢNG CAO:\n\n${postText}`;
   if (fullCaption.length <= TELEGRAM_CAPTION_MAX) {
     return { caption: fullCaption, truncated: false };
   }
 
-  const suffix = "\n\n... (caption da rut gon)";
+  const suffix = "\n\n... (caption đã rút gọn)";
   const trimmed = fullCaption.slice(0, TELEGRAM_CAPTION_MAX - suffix.length) + suffix;
   return { caption: trimmed, truncated: true };
 }
@@ -329,14 +329,14 @@ async function sendDraftPreview(ctx, imageAsset, postText) {
     console.log("[bot] Preview image failed, fallback text:", imageError.message);
     await safeReplyLongText(
       ctx,
-      `BAN THAO (loi hien thi anh):\n\n${imageUrl ? `Link anh: ${imageUrl}\n\n` : ""}${postText}`,
+      `BẢN THẢO (lỗi hiển thị ảnh):\n\n${imageUrl ? `Link ảnh: ${imageUrl}\n\n` : ""}${postText}`,
       buildDraftKeyboard()
     );
     return;
   }
 
   if (truncated) {
-    await safeReplyLongText(ctx, `Ban day du:\n\n${postText}`);
+    await safeReplyLongText(ctx, `Bản đầy đủ:\n\n${postText}`);
   }
 }
 
@@ -365,18 +365,18 @@ async function runDeletePostFlow(ctx, inputPostId = "") {
 
   if (!postId) {
     await ctx.reply(
-      "Chua co ID de xoa. Dung: /delete <post_id> hoac dang bai moi roi /delete."
+      "Chưa có ID để xóa. Dùng: /delete <post_id> hoặc đăng bài mới rồi /delete."
     );
     return;
   }
 
-  const statusMsg = await ctx.reply(`Dang yeu cau Facebook go bai: ${postId}...`);
+  const statusMsg = await ctx.reply(`Đang yêu cầu Facebook gỡ bài: ${postId}...`);
   try {
     await deleteFacebookPost(postId);
     forgetPublishedPost(chatId, postId);
-    await updateStatus(ctx, statusMsg, "Da xoa bai viet thanh cong khoi Fanpage.");
+    await updateStatus(ctx, statusMsg, "Đã xóa bài viết thành công khỏi Fanpage.");
   } catch (error) {
-    await updateStatus(ctx, statusMsg, `Xoa that bai: ${error.message}`);
+    await updateStatus(ctx, statusMsg, `Xóa thất bại: ${error.message}`);
   }
 }
 
@@ -389,17 +389,17 @@ async function runRewriteFlow(ctx, rawContent) {
   const userRaw = String(rawContent || "").trim();
   if (!userRaw) {
     await ctx.reply(
-      "Ban hay gui: /rewrite <noi dung tho>\nHoac: Viet lai: <noi dung tho>"
+      "Bạn hãy gửi: /rewrite <nội dung thô>\nHoặc: Viết lại: <nội dung thô>"
     );
     return;
   }
 
-  const statusMsg = await ctx.reply("[1/3] Dang refactor noi dung theo phong cach The Little Coder...");
+  const statusMsg = await ctx.reply("[1/3] Đang refactor nội dung theo phong cách The Little Coder...");
 
   try {
     const structuredRaw = await askAI(
-      `Noi dung tho cua Tien:\n${userRaw}\n\n` +
-        "Hay giu nguyen y chinh, chi chinh sua ngon tu va tra ve JSON dung schema.",
+      `Nội dung thô của Tiến:\n${userRaw}\n\n` +
+        "Hãy giữ nguyên ý chính, chỉ chỉnh sửa ngôn từ và trả về JSON đúng schema.",
       {
         systemPrompt: REFINE_CONTENT_PROMPT,
         model:
@@ -415,7 +415,7 @@ async function runRewriteFlow(ctx, rawContent) {
     await updateStatus(
       ctx,
       statusMsg,
-      "[2/3] Dang parse JSON va don dep noi dung de tao ban thao..."
+      "[2/3] Đang parse JSON và dọn đẹp nội dung để tạo bản thảo..."
     );
 
     const structured = parseStructuredAiOutput(structuredRaw, buildTopicFromRawContent(userRaw));
@@ -430,7 +430,7 @@ async function runRewriteFlow(ctx, rawContent) {
     await updateStatus(
       ctx,
       statusMsg,
-      "[3/3] Dang tao banner va gui ban thao de duyet..."
+      "[3/3] Đang tạo banner và gửi bản thảo để duyệt..."
     );
 
     const imageAsset = await generateImageAsset(imageMeta, "default");
@@ -448,24 +448,24 @@ async function runRewriteFlow(ctx, rawContent) {
     await updateStatus(
       ctx,
       statusMsg,
-      "Da refactor xong. Ban thao san sang, bam Duyet & Dang bai neu ok."
+      "Đã refactor xong. Bản thảo sẵn sàng, bấm Duyệt & Đăng bài nếu ok."
     );
   } catch (error) {
     console.error("[bot] Rewrite workflow error:", error.message);
-    await updateStatus(ctx, statusMsg, "Rewrite bi gian doan. Dang bao loi...");
-    await ctx.reply(`Rewrite that bai: ${error.message}`);
+    await updateStatus(ctx, statusMsg, "Rewrite bị gián đoạn. Đang báo lỗi...");
+    await ctx.reply(`Rewrite thất bại: ${error.message}`);
   }
 }
 
 bot.start((ctx) => {
   ctx.reply(
-    "Chao Tien! Toi da san sang research, viet bai va tao banner."
+    "Chào Tiến! Tôi đã sẵn sàng research, viết bài và tạo banner."
   );
 });
 
 bot.help((ctx) => {
   ctx.reply(
-    "Lenh hien tai: /start, /help, /post <chu de>, /rewrite <noi dung tho>, /delete <post_id>."
+    "Lệnh hiện tại: /start, /help, /post <chủ đề>, /rewrite <nội dung thô>, /delete <post_id>."
   );
 });
 
@@ -503,11 +503,11 @@ bot.on("text", async (ctx) => {
   if (userText.startsWith("/post")) {
     const topic = userText.replace("/post", "").trim();
     if (!topic) {
-      await ctx.reply("Vui long dung dung: /post <chu de>");
+      await ctx.reply("Vui lòng dùng đúng: /post <chủ đề>");
       return;
     }
 
-    const statusMsg = await ctx.reply(`[1/4] Dang quet tin tuc quoc te ve: ${topic}...`);
+    const statusMsg = await ctx.reply(`[1/4] Đang quét tin tức quốc tế về: ${topic}...`);
 
     try {
       const research = await researchToday(topic, {
@@ -519,14 +519,14 @@ bot.on("text", async (ctx) => {
       await updateStatus(
         ctx,
         statusMsg,
-        `[2/4] Da quet ${research.totalResults} nguon. Dang viet bai va tạo JSON theo hiep phap content...`
+        `[2/4] Đã quét ${research.totalResults} nguồn. Đang viết bài và tạo JSON theo hiến pháp content...`
       );
 
       const structuredRaw = await askAI(
-        `Du lieu research goc:\n${research.infoText}\n\n` +
-          `Chu de goc: ${topic}\n` +
-          `Tu khoa tim kiem tieng Anh: ${research.query}\n\n` +
-          "Hay tao output JSON dung schema yeu cau. Khong tra ve markdown, khong loi giai thich.",
+          `Dữ liệu research gốc:\n${research.infoText}\n\n` +
+          `Chủ đề gốc: ${topic}\n` +
+          `Từ khóa tìm kiếm tiếng Anh: ${research.query}\n\n` +
+          "Hãy tạo output JSON đúng schema yêu cầu. Không trả về markdown, không lời giải thích.",
         {
           systemPrompt: DEEP_RESEARCH_PROMPT,
           model:
@@ -542,7 +542,7 @@ bot.on("text", async (ctx) => {
       await updateStatus(
         ctx,
         statusMsg,
-        "[3/4] Dang parse JSON va don dep noi dung Facebook..."
+        "[3/4] Đang parse JSON và dọn đẹp nội dung Facebook..."
       );
 
       const structured = parseStructuredAiOutput(structuredRaw, topic);
@@ -557,7 +557,7 @@ bot.on("text", async (ctx) => {
       await updateStatus(
         ctx,
         statusMsg,
-        "[4/4] Gemini dang tao banner theo bo cuc The Little Coder..."
+        "[4/4] Gemini đang tạo banner theo bố cục The Little Coder..."
       );
 
       const imageAsset = await generateImageAsset(imageMeta, "default");
@@ -573,18 +573,18 @@ bot.on("text", async (ctx) => {
       await updateStatus(
         ctx,
         statusMsg,
-        "Hoan tat quy trinh Deep Research. Ban thao da san sang de duyet."
+        "Hoàn tất quy trình Deep Research. Bản thảo đã sẵn sàng để duyệt."
       );
     } catch (error) {
       console.error("[bot] Post workflow error:", error.message);
       const lower = String(error.message || "").toLowerCase();
       const friendlyMessage = lower.includes("timeout")
-        ? "AI suy nghi qua lau (timeout). Tien thu ra lenh /post lai nhe!"
+        ? "AI suy nghĩ quá lâu (timeout). Tiến thử ra lệnh /post lại nhé!"
         : error.message;
 
-      await updateStatus(ctx, statusMsg, "Quy trinh bi gian doan. Dang bao loi cho Tien...");
+      await updateStatus(ctx, statusMsg, "Quy trình bị gián đoạn. Đang báo lỗi cho Tiến...");
       await ctx.reply(
-        `Tien oi, toi dang bi ket trong dong suy nghi.\n\nLoi: ${friendlyMessage}`
+        `Tiến ơi, tôi đang bị kẹt trong dòng suy nghĩ.\n\nLỗi: ${friendlyMessage}`
       );
     }
 
@@ -592,11 +592,11 @@ bot.on("text", async (ctx) => {
   }
 
   if (userText.startsWith("/")) {
-    await ctx.reply("Lenh khong hop le. Dung /help de xem lenh ho tro.");
+    await ctx.reply("Lệnh không hợp lệ. Dùng /help để xem lệnh hỗ trợ.");
     return;
   }
 
-  await ctx.reply("Dang suy nghi...");
+  await ctx.reply("Đang suy nghĩ...");
   const aiAnswer = await askAI(userText, {
     timeout: 300000,
   });
@@ -607,7 +607,7 @@ bot.catch(async (error, ctx) => {
   console.error("[bot] Unhandled middleware error:", error);
   try {
     if (ctx?.chat?.id && String(ctx.chat.id) === ownerChatId()) {
-      await ctx.reply("Tien oi, toi gap loi ngoai du kien. Thu lai giup minh nhe!");
+      await ctx.reply("Tiến ơi, tôi gặp lỗi ngoài dự kiến. Thử lại giúp mình nhé!");
     }
   } catch (notifyError) {
     console.error("[bot] Failed to notify error to user:", notifyError.message);
@@ -618,17 +618,17 @@ bot.action("regen_image", async (ctx) => {
   const chatId = String(ctx.chat?.id || "");
 
   if (chatId !== ownerChatId()) {
-    await ctx.answerCbQuery("Ban khong co quyen nay.", { show_alert: true });
+    await ctx.answerCbQuery("Bạn không có quyền này.", { show_alert: true });
     return;
   }
 
   const draft = draftStore.get(chatId);
   if (!draft) {
-    await ctx.answerCbQuery("Khong co ban thao de tao lai anh.");
+    await ctx.answerCbQuery("Không có bản thảo để tạo lại ảnh.");
     return;
   }
 
-  await ctx.answerCbQuery("Dang tao anh moi...");
+  await ctx.answerCbQuery("Đang tạo ảnh mới...");
 
   const newImageAsset = await generateImageAsset(draft.imageMeta || draft.topic, "default");
   const updatedDraft = {
@@ -645,26 +645,26 @@ bot.action("confirm_post", async (ctx) => {
   const chatId = String(ctx.chat?.id || "");
 
   if (chatId !== ownerChatId()) {
-    await ctx.answerCbQuery("Ban khong co quyen nay.", { show_alert: true });
+    await ctx.answerCbQuery("Bạn không có quyền này.", { show_alert: true });
     return;
   }
 
   const draft = draftStore.get(chatId);
   if (!draft) {
-    await ctx.answerCbQuery("Khong co ban thao de dang.");
+    await ctx.answerCbQuery("Không có bản thảo để đăng.");
     return;
   }
 
-  await ctx.answerCbQuery("Dang dang bai len Facebook...");
+  await ctx.answerCbQuery("Đang đăng bài lên Facebook...");
 
   try {
     const callbackMessage = ctx.callbackQuery?.message;
     if (callbackMessage?.caption) {
-      await ctx.editMessageCaption("Dang day bai len Fanpage...");
+      await ctx.editMessageCaption("Đang đẩy bài lên Fanpage...");
     } else if (callbackMessage?.text) {
-      await ctx.editMessageText("Dang day bai len Fanpage...");
+      await ctx.editMessageText("Đang đẩy bài lên Fanpage...");
     } else {
-      await ctx.reply("Dang day bai len Fanpage...");
+      await ctx.reply("Đang đẩy bài lên Fanpage...");
     }
 
     const fbPostId = await postToFacebook(
@@ -681,14 +681,14 @@ bot.action("confirm_post", async (ctx) => {
     }
 
     await ctx.reply(
-      `LEN SONG THANH CONG!\n\n` +
-        `ID bai viet: \`${fbPostId}\`\n\n` +
-        `Neu muon xoa bai nay, go:\n` +
+      `LÊN SÓNG THÀNH CÔNG!\n\n` +
+        `ID bài viết: \`${fbPostId}\`\n\n` +
+        `Nếu muốn xóa bài này, gõ:\n` +
         `\`/delete ${fbPostId}\``,
       { parse_mode: "Markdown" }
     );
   } catch (error) {
-    await ctx.reply(`Dang bai that bai: ${error.message}`);
+    await ctx.reply(`Đăng bài thất bại: ${error.message}`);
   }
 });
 
@@ -696,12 +696,12 @@ bot.action("cancel_post", async (ctx) => {
   const chatId = String(ctx.chat?.id || "");
 
   if (chatId !== ownerChatId()) {
-    await ctx.answerCbQuery("Ban khong co quyen nay.", { show_alert: true });
+    await ctx.answerCbQuery("Bạn không có quyền này.", { show_alert: true });
     return;
   }
 
   draftStore.delete(chatId);
-  await ctx.answerCbQuery("Da huy ban thao.");
+  await ctx.answerCbQuery("Đã hủy bản thảo.");
 
   try {
     await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
@@ -709,7 +709,7 @@ bot.action("cancel_post", async (ctx) => {
     console.log("[bot] Could not clear inline keyboard:", editError.message);
   }
 
-  await ctx.reply("Da bo qua ban thao hien tai.");
+  await ctx.reply("Đã bỏ qua bản thảo hiện tại.");
 });
 
 bot.launch().then(() => {
