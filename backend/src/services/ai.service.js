@@ -39,6 +39,12 @@ Trước khi viết, hãy tự phân tích:
 1. TIÊU ĐỀ: VIẾT HOA + Emoji.
 2. KHÔNG BOLD: Tuyệt đối không dùng ** hoặc __.
 3. NHẤN MẠNH: VIẾT HOA từ khóa quan trọng.
+4. KHÔNG markdown thừa: không dùng ###, không code fence trừ khi là snippet code thật sự cần thiết.
+
+[QUALITY REFINEMENT RULES]
+1. Nếu cần nhấn mạnh, dùng VIẾT HOA hoặc emoji dòng, KHÔNG dùng dấu sao **.
+2. Nếu nội dung chạm vào nền tảng HTML/CSS/frontend cơ bản, thêm ít nhất 1 câu "xát muối" thực tế về việc phụ thuộc framework quá sớm.
+3. Khi nói về Accessibility/A11Y: thể hiện rõ mindset "STANDARD, KHÔNG PHẢI OPTION".
 
 [OUTPUT FORMAT]
 Bạn PHẢI trả về kết quả dưới định dạng JSON duy nhất.
@@ -178,6 +184,11 @@ ${VIRAL_HOOK_LIST.join("\n")}
 7. Ngôn ngữ: Tiếng Việt tự nhiên, giữ thuật ngữ chuyên ngành Dev khi cần.
 8. Chỉ dùng icon 📘 ở dòng tiêu đề DAY, không spam icon này ở mọi dòng.
 9. Kết bài bằng 1 câu hỏi ngắn để kéo thảo luận.
+10. Tuyệt đối không dùng dấu ** để in đậm; nếu cần nhấn mạnh thì VIẾT HOA.
+11. Nếu bài có phần nền tảng HTML/CSS/layout, chèn 1 câu cảnh báo thực chiến kiểu:
+    "BỎ NGAY việc nhảy vào framework quá sớm nếu chưa nắm layout thuần."
+12. Nếu đề cập A11Y, dùng quan điểm:
+    "A11Y là STANDARD, không phải nice-to-have."
 
 [OUTPUT]
 Trả về JSON đúng schema:
