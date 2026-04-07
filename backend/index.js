@@ -35,7 +35,50 @@ const {
   deleteDraftRecordById,
 } = require("./src/services/draft.service");
 
-const telegramToken = process.env.TELEGRAM_TOKEN;
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return "";
+}
+
+const APP_ENV = String(process.env.APP_ENV || process.env.NODE_ENV || "development")
+  .trim()
+  .toLowerCase();
+const IS_PRODUCTION_ENV = APP_ENV === "production";
+
+function resolveTelegramToken() {
+  if (IS_PRODUCTION_ENV) {
+    return firstNonEmpty(
+      process.env.TELEGRAM_BOT_PROD_TOKEN,
+      process.env.TELEGRAM_TOKEN_PROD,
+      process.env.TELEGRAM_TOKEN
+    );
+  }
+
+  return firstNonEmpty(
+    process.env.TELEGRAM_BOT_TEST_TOKEN,
+    process.env.TELEGRAM_TOKEN_DEV,
+    process.env.TELEGRAM_TOKEN
+  );
+}
+
+function resolveOwnerChatId() {
+  if (IS_PRODUCTION_ENV) {
+    return firstNonEmpty(process.env.MY_CHAT_ID_PROD, process.env.MY_CHAT_ID);
+  }
+
+  return firstNonEmpty(
+    process.env.MY_CHAT_ID_TEST,
+    process.env.MY_CHAT_ID_DEV,
+    process.env.MY_CHAT_ID
+  );
+}
+
+const telegramToken = resolveTelegramToken();
 const draftStore = new Map();
 const publishedPostStore = new Map();
 const roadmapProposalStore = new Map();
@@ -53,7 +96,9 @@ const ENABLE_IMAGE_GENERATION = parseBoolean(
 );
 
 if (!telegramToken) {
-  throw new Error("Missing TELEGRAM_TOKEN in backend/.env");
+  throw new Error(
+    "Missing Telegram bot token. Configure TELEGRAM_BOT_TEST_TOKEN (dev) or TELEGRAM_BOT_PROD_TOKEN (prod)."
+  );
 }
 
 function processExists(pid) {
@@ -89,7 +134,8 @@ function releaseBotLock() {
 }
 
 function acquireBotLock() {
-  const configuredPath = String(process.env.BOT_LOCK_FILE || ".bot.lock").trim();
+  const defaultLockFile = IS_PRODUCTION_ENV ? ".bot.prod.lock" : ".bot.dev.lock";
+  const configuredPath = String(process.env.BOT_LOCK_FILE || defaultLockFile).trim();
   const lockPath = path.isAbsolute(configuredPath)
     ? configuredPath
     : path.resolve(__dirname, configuredPath);
@@ -139,9 +185,10 @@ function acquireBotLock() {
 acquireBotLock();
 
 const bot = new Telegraf(telegramToken, { handlerTimeout: 600000 });
+console.log(`[boot] APP_ENV=${APP_ENV} (telegram mode: ${IS_PRODUCTION_ENV ? "production" : "development"})`);
 
 function ownerChatId() {
-  return String(process.env.MY_CHAT_ID || "");
+  return resolveOwnerChatId();
 }
 
 function markCommandHandled(ctx) {
@@ -1424,7 +1471,9 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
 
   const adminChatId = ownerChatId();
   if (!adminChatId) {
-    console.warn("[roadmap] MY_CHAT_ID is missing. Skip auto draft.");
+    console.warn(
+      "[roadmap] Missing admin chat id. Configure MY_CHAT_ID_TEST (dev) or MY_CHAT_ID_PROD (prod). Skip auto draft."
+    );
     return false;
   }
 
