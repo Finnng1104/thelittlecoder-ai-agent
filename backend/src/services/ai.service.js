@@ -21,28 +21,36 @@ const DEFAULT_SYSTEM_PROMPT =
 
 const THE_LITTLE_CODER_ENGINE_V2_JSON = `
 [ROLE]
-Bạn là "The Little Coder" - một Junior Frontend Developer tại Việt Nam. Giọng văn thân thiện, "anh em", khiêm tốn nhưng chuyên nghiệp.
+Bạn là "The Little Coder" - một Junior Software Engineer thực chiến.
+Bạn không viết lý thuyết suông, bạn kể câu chuyện về những lần "ăn hành", những đêm debug trắng mắt và những bài học xương máu.
 
-[LANGUAGE RULES - CRITICAL]
-1. 100% TIẾNG VIỆT THUẦN TÚY: Tuyệt đối không sử dụng chữ Hán (探讨, 真的, 依赖).
-2. THUẬT NGỮ CHUYÊN NGÀNH: Giữ nguyên tiếng Anh (Middleware, Props, State...).
+[PHASE 1: AUDIENCE ANALYSIS - THỰC HIỆN NGẦM]
+Trước khi viết, hãy tự phân tích:
+1. Persona: Junior, Sinh viên hay người mới chuyển ngành?
+2. Pain Point: Nỗi sợ bị đào thải? Sự bất lực trước đống bug? Hay cảm giác "ngáo" kiến thức?
+3. Agitation: Xát muối vào nỗi đau bằng các chi tiết thực tế (mồ hôi hột, màn hình xanh, tiếng quạt laptop, cảm giác muốn bỏ cuộc).
 
-[FACEBOOK UI/UX FORMATTING RULES]
-1. TIÊU ĐỀ: Phải VIẾT HOA TOÀN BỘ và bắt đầu bằng Emoji (Ví dụ: 🚀 TIÊU ĐỀ).
-2. TUYỆT ĐỐI KHÔNG DÙNG BOLD: Không sử dụng dấu ** hoặc __ trong bất kỳ hoàn cảnh nào. Viết văn bản trơn hoàn toàn.
-3. NHẤN MẠNH: Sử dụng VIẾT HOA cho các từ khóa thực sự quan trọng. Dùng Emoji ở đầu dòng làm điểm neo.
-4. DANH SÁCH & KHOẢNG TRẮNG: Dùng số 1️⃣, 2️⃣ hoặc icon ✅. Ngắt 2 dòng giữa các đoạn văn.
+[LANGUAGE RULES]
+1. 100% TIẾNG VIỆT: Tuyệt đối không dùng chữ Hán.
+2. DEV-NATIVE: Dùng từ chuyên ngành (Refactor, Bug, Deploy, Production, Tech-debt...).
+3. VIBE: Thẳng thắn, "gắt" nhưng chân thành. Tránh từ sáo rỗng "vô cùng", "tuyệt vời".
 
-[OUTPUT FORMAT - REQUIRED JSON]
-Bạn PHẢI trả về kết quả dưới định dạng JSON duy nhất, không có văn bản thừa bên ngoài:
+[FACEBOOK UI/UX]
+1. TIÊU ĐỀ: VIẾT HOA + Emoji.
+2. KHÔNG BOLD: Tuyệt đối không dùng ** hoặc __.
+3. NHẤN MẠNH: VIẾT HOA từ khóa quan trọng.
+
+[OUTPUT FORMAT]
+Bạn PHẢI trả về kết quả dưới định dạng JSON duy nhất.
 {
-  "post_content": "Nội dung bài viết Facebook (văn bản trơn, VIẾT HOA từ khóa cần nhấn mạnh, không có dấu **)",
-  "image_short_title": "Tiêu đề tiếng Anh ngắn gọn cho ảnh (Ví dụ: REACT PROPS)",
-  "ant_action": "Mô tả hành động con kiến (Ví dụ: sitting confusedly, celebrating)",
-  "log_message": "Dòng chữ cho console.log trên ảnh (Ví dụ: Learning React...)"
+  "post_content": "Nội dung bài viết (áp dụng công thức PAS: Problem - Agitation - Solution)",
+  "image_short_title": "Tiêu đề tiếng Anh ngắn gọn cho ảnh",
+  "ant_action": "Mô tả hành động con kiến CỤ THỂ và HÀI HƯỚC gắn với topic",
+  "log_message": "Dòng chữ cho console.log"
 }
 
-LƯU Ý: Tuyệt đối không hiển thị phần mô tả "Image Prompt" hay bất kỳ dòng giải thích nào khác ngoài JSON.
+RESPONSE PHẢI LÀ MỘT JSON STRING HỢP LỆ.
+KHÔNG CÓ VĂN BẢN THỪA, KHÔNG BỌC TRONG MARKDOWN CODE BLOCKS (\`\`\`).
 `.trim();
 
 const DEEP_RESEARCH_PROMPT = `
@@ -96,7 +104,7 @@ Yeu cau bat buoc:
 const ROADMAP_GENERATOR_PROMPT = `
 [TASK]
 Phân rã chủ đề học tập thành một lộ trình nội dung theo thứ tự dễ -> khó.
-Số lượng bài PHẢI phù hợp độ rộng/chuyên sâu của chủ đề, KHÔNG cố định.
+Số lượng bài PHẢI phù hợp độ rộng/chuyên sâu của chủ đề, KHÔNG cố định, nhưng TỐI ĐA 30 bài.
 
 [RULES]
 1. Trả về DUY NHẤT một JSON Array.
@@ -108,6 +116,7 @@ Số lượng bài PHẢI phù hợp độ rộng/chuyên sâu của chủ đề
 4. Tập trung vào thực chiến cho dev (ưu tiên ví dụ thật, bài học làm dự án, lỗi thường gặp).
 5. Không kéo dài roadmap cho đủ số lượng.
 6. Chủ đề hẹp: roadmap ngắn; chủ đề rộng: roadmap dài hơn.
+7. RESPONSE PHẢI LÀ MỘT JSON STRING HỢP LỆ. KHÔNG CÓ VĂN BẢN THỪA, KHÔNG BỌC TRONG MARKDOWN CODE BLOCKS (\`\`\`).
 
 [OUTPUT EXAMPLE]
 [
@@ -116,20 +125,59 @@ Số lượng bài PHẢI phù hợp độ rộng/chuyên sâu của chủ đề
 ]
 `.trim();
 
+const VIRAL_HOOK_LIST = [
+  // Nhóm 1: Xát muối & Cảnh báo
+  "🚀 DỪNG VIỆC {bad_habit} NGAY HÔM NAY NẾU KHÔNG MUỐN {consequence}!",
+  "🚀 7 SAI LẦM CHẾT NGƯỜI MÀ MỌI JUNIOR ĐỀU MẮC PHẢI KHI {action}!",
+  "🚀 BẠN CẦN NGỪNG LÀM {thói_quen_xấu} CÀNG SỚM CÀNG TỐT ĐỂ LÊN TRÌNH!",
+  "🚀 ĐỪNG BAO GIỜ {hành_động_sai} MỘT LẦN NÀO NỮA SAU KHI ĐỌC BÀI NÀY!",
+
+  // Nhóm 2: Tiết kiệm thời gian & Tối ưu
+  "🚀 10 MẸO TIẾT KIỆM THỜI GIAN ĐỈNH CAO ĐỂ {kết_quả_mong_muốn}!",
+  "🚀 CÁCH ĐỂ {task_phức_tạp} CHỈ TRONG MỘT NỬA THỜI GIAN!",
+  "🚀 ĐÂY LÀ CÁCH NHANH NHẤT VÀ DỄ NHẤT ĐỂ {master_kỹ_năng}!",
+  "🚀 5 BƯỚC ĐỂ CẢI THIỆN {năng_lực} MÀ KHÔNG MẤT QUÁ NHIỀU CÔNG SỨC!",
+
+  // Nhóm 3: Bí mật & Uy tín
+  "🚀 {task} NHƯ MỘT CHUYÊN GIA CHỈ TRONG 10 BƯỚC ĐƠN GIẢN!",
+  "🚀 ÍT NGƯỜI BIẾT CÁCH ĐỂ {lợi_ích_kỹ_thuật} MỘT CÁCH TỐI ƯU!",
+  "🚀 QUAN NIỆM SAI LẦM PHỔ BIẾN NHẤT KHI NÓI ĐẾN {chủ_đề} LÀ...",
+  "🚀 {số_lượng} NGUYÊN TẮC ĐƠN GIẢN ĐẰNG SAU {thứ_phức_tạp}!",
+
+  // Nhóm 4: Sự thật phũ phàng
+  "🚀 BẠN ĐANG HIỂU SAI VỀ {thuật_ngữ_kỹ_thuật} RỒI, ĐÂY MỚI LÀ SỰ THẬT!",
+  "🚀 TẠI SAO {thứ_nhàm_chán} LẠI LÀ CÁCH NHANH NHẤT ĐỂ TẠO NÊN ĐỘT PHÁ?",
+  "🚀 TÔI GHÉT PHẢI NÓI ĐIỀU NÀY, NHƯNG {sự_thật_đau_lòng} VỀ NGHỀ DEV!",
+];
+
 const SERIES_POST_PROMPT = `
 ${THE_LITTLE_CODER_ENGINE_V2_JSON}
 
 [SERIES MODE]
-Bạn đang viết bài thuộc series roadmap theo ngày.
-Mục tiêu: ngắn gọn, dễ hiểu, vào thẳng trọng tâm, hạn chế màu mè.
+Bạn đang viết bài cho series Roadmap.
+Hãy áp dụng chiến thuật "Người anh đi trước".
+
+[VIRAL HOOK INSTRUCTION]
+Chọn 1 cấu trúc Hook từ danh sách dưới đây để mở đầu bài viết:
+${VIRAL_HOOK_LIST.join("\n")}
 
 [STYLE RULES]
-1. Mở đầu bắt buộc theo format: "📘 DAY {day}: {tiêu đề bài}".
-2. Nội dung NGẮN GỌN, DỄ HIỂU, tránh dài dòng.
-3. Ưu tiên dạng "đọc nhanh là làm được": định nghĩa ngắn, 2-4 ý chính, 1 ví dụ cực ngắn.
-4. Không viết lan man kiểu blog dài.
-5. Dùng tiếng Việt tự nhiên, giữ thuật ngữ kỹ thuật tiếng Anh khi cần.
-6. Kết bài bằng 1 câu hỏi ngắn để mời thảo luận.
+1. KHÔNG chọn hook ngẫu nhiên.
+2. Chọn hook theo ngữ cảnh nội dung:
+   - Nếu bài thiên bug/lỗi/debug/fix -> ưu tiên Nhóm 1.
+   - Nếu bài thiên mẹo tối ưu/perf/tăng tốc -> ưu tiên Nhóm 2.
+   - Nếu bài thiên góc nhìn chuyên gia/nguyên tắc -> ưu tiên Nhóm 3.
+   - Nếu bài thiên phản biện/phá hiểu lầm -> ưu tiên Nhóm 4.
+3. Thay thế toàn bộ placeholder { ... } bằng nội dung kỹ thuật cụ thể của bài.
+4. Hook phải nằm ở dòng đầu tiên.
+5. FORMAT: Dòng tiếp theo là "📘 DAY {day}: {topic}".
+6. NỘI DUNG:
+   - Không liệt kê định nghĩa khô. Hãy kể một lỗi (bug) kinh điển thường gặp ở bài này.
+   - Đưa giải pháp thực chiến, cầm tay chỉ việc.
+   - Trình bày bằng bullet points (✅, ❌, 💡), ưu tiên đọc nhanh trên mobile.
+7. Ngôn ngữ: Tiếng Việt tự nhiên, giữ thuật ngữ chuyên ngành Dev khi cần.
+8. Chỉ dùng icon 📘 ở dòng tiêu đề DAY, không spam icon này ở mọi dòng.
+9. Kết bài bằng 1 câu hỏi ngắn để kéo thảo luận.
 
 [OUTPUT]
 Trả về JSON đúng schema:
@@ -141,8 +189,11 @@ Trả về JSON đúng schema:
 }
 
 Yêu cầu riêng:
-- image_short_title phải ngắn, dễ đọc trên ảnh, dạng series: "DAY {day} {SHORT TITLE}".
-- Không markdown, không giải thích ngoài JSON.
+- Sử dụng "image_hint" từ roadmap làm gốc cho image_short_title.
+- Format image_short_title: "DAY {day}: {IMAGE_HINT}".
+- ant_action phải CỤ THỂ và HÀI HƯỚC, gắn trực tiếp với ngữ cảnh kỹ thuật (ví dụ 404, infinite loop, stale state...).
+- RESPONSE PHẢI LÀ MỘT JSON STRING HỢP LỆ.
+- KHÔNG có văn bản thừa, KHÔNG bọc trong markdown code blocks (\`\`\`).
 `.trim();
 
 const IMAGE_PROMPT_SYSTEM = `
@@ -179,7 +230,9 @@ function isFreeModel(modelId) {
 }
 
 function parseBooleanEnv(value, defaultValue = false) {
-  const raw = String(value ?? "").trim().toLowerCase();
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (!raw) {
     return defaultValue;
   }
@@ -199,7 +252,9 @@ function allowPaidFallback(primaryModel, options = {}) {
 }
 
 function buildModelQueue(primaryModel, options = {}) {
-  const explicit = Array.isArray(options.retryModels) ? options.retryModels : [];
+  const explicit = Array.isArray(options.retryModels)
+    ? options.retryModels
+    : [];
   const envExtra = String(process.env.OPENROUTER_RETRY_MODELS || "")
     .split(",")
     .map((x) => x.trim())
@@ -217,7 +272,7 @@ function buildModelQueue(primaryModel, options = {}) {
       ...envExtra.map((m) => normalizeOpenRouterModel(m)),
       ...defaultRetryModels,
       ...(paidFallbackEnabled ? [FALLBACK_MODEL] : []),
-    ])
+    ]),
   );
 
   if (paidFallbackEnabled) {
@@ -237,12 +292,14 @@ function buildModelQueue(primaryModel, options = {}) {
 }
 
 function shouldRetryWithAnotherModel(error) {
-  const status = Number(error?.response?.status || error?.response?.data?.error?.code || 0);
+  const status = Number(
+    error?.response?.status || error?.response?.data?.error?.code || 0,
+  );
   const message = String(
     error?.response?.data?.error?.metadata?.raw ||
       error?.response?.data?.error?.message ||
       error?.message ||
-      ""
+      "",
   ).toLowerCase();
 
   return (
@@ -251,17 +308,71 @@ function shouldRetryWithAnotherModel(error) {
     message.includes("deprecated") ||
     message.includes("provider returned error") ||
     message.includes("not a valid model id") ||
-    message.includes("model") && message.includes("not found")
+    (message.includes("model") && message.includes("not found"))
   );
 }
 
-function buildRequestPayload(modelId, question, systemPrompt, temperature, options = {}) {
+function tryExtractJsonOnlyContent(rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) {
+    return text;
+  }
+
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced?.[1]) {
+    const candidate = fenced[1].trim();
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") {
+        return candidate;
+      }
+    } catch (_error) {
+      // Keep trying other strategies.
+    }
+  }
+
+  const objectMatch = text.match(/\{[\s\S]*\}/);
+  if (objectMatch?.[0]) {
+    const candidate = objectMatch[0].trim();
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return candidate;
+      }
+    } catch (_error) {
+      // Keep trying array strategy.
+    }
+  }
+
+  const arrayMatch = text.match(/\[[\s\S]*\]/);
+  if (arrayMatch?.[0]) {
+    const candidate = arrayMatch[0].trim();
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed)) {
+        return candidate;
+      }
+    } catch (_error) {
+      // No-op.
+    }
+  }
+
+  return text;
+}
+
+function buildRequestPayload(
+  modelId,
+  question,
+  systemPrompt,
+  temperature,
+  options = {},
+) {
   const maxTokens = Number(
     options.maxTokens ??
       options.max_tokens ??
       process.env.AI_MAX_TOKENS ??
       process.env.OPENROUTER_MAX_TOKENS ??
-      1500
+      1500,
   );
 
   const payload = {
@@ -277,7 +388,8 @@ function buildRequestPayload(modelId, question, systemPrompt, temperature, optio
     payload.max_tokens = Math.floor(maxTokens);
   }
 
-  const transforms = options.transforms || process.env.OPENROUTER_TRANSFORMS || "middleman";
+  const transforms =
+    options.transforms || process.env.OPENROUTER_TRANSFORMS || "middleman";
   const transformList = String(transforms)
     .split(",")
     .map((x) => x.trim())
@@ -303,7 +415,8 @@ async function askAI(question, options = {}) {
     const temperature = options.temperature ?? 0.6;
     const timeout = options.timeout ?? 300000;
     const modelQueue = buildModelQueue(model, options);
-    const siteUrl = process.env.OPENROUTER_SITE_URL || "https://thelittlecoder.com";
+    const siteUrl =
+      process.env.OPENROUTER_SITE_URL || "https://thelittlecoder.com";
     const appName = process.env.OPENROUTER_APP_NAME || "The Little Coder Bot";
 
     const requestConfig = {
@@ -323,24 +436,38 @@ async function askAI(question, options = {}) {
       try {
         response = await axios.post(
           OPENROUTER_URL,
-          buildRequestPayload(candidateModel, question, systemPrompt, temperature, options),
-          requestConfig
+          buildRequestPayload(
+            candidateModel,
+            question,
+            systemPrompt,
+            temperature,
+            options,
+          ),
+          requestConfig,
         );
         break;
       } catch (error) {
         lastError = error;
         // Neu transform gây loi, thu lai khong transform 1 lan cho model hien tai.
-        const transformMessage = String(error?.response?.data?.error?.message || "").toLowerCase();
+        const transformMessage = String(
+          error?.response?.data?.error?.message || "",
+        ).toLowerCase();
         const transformFailed = transformMessage.includes("transform");
         if (transformFailed) {
           try {
             response = await axios.post(
               OPENROUTER_URL,
-              buildRequestPayload(candidateModel, question, systemPrompt, temperature, {
-                ...options,
-                transforms: "",
-              }),
-              requestConfig
+              buildRequestPayload(
+                candidateModel,
+                question,
+                systemPrompt,
+                temperature,
+                {
+                  ...options,
+                  transforms: "",
+                },
+              ),
+              requestConfig,
             );
             break;
           } catch (retryError) {
@@ -353,13 +480,15 @@ async function askAI(question, options = {}) {
         }
 
         console.warn(
-          `[ai.service] Model "${candidateModel}" unavailable, retrying with another provider/model...`
+          `[ai.service] Model "${candidateModel}" unavailable, retrying with another provider/model...`,
         );
       }
     }
 
     if (!response) {
-      throw lastError || new Error("OpenRouter request failed without response");
+      throw (
+        lastError || new Error("OpenRouter request failed without response")
+      );
     }
 
     let content = response.data.choices?.[0]?.message?.content || "";
@@ -367,14 +496,25 @@ async function askAI(question, options = {}) {
     // MẸO: Loại bỏ đoạn "suy nghĩ" <think>...</think> của DeepSeek để bài viết sạch đẹp
     content = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
+    const shouldExtractJson =
+      options.expectJson === true ||
+      /\bOUTPUT FORMAT\b|\bJSON\b/i.test(String(systemPrompt || ""));
+    if (shouldExtractJson) {
+      content = tryExtractJsonOnlyContent(content);
+    }
+
     return content || "Tôi chưa có câu trả lời phù hợp.";
   } catch (error) {
     const timeoutLike =
       error.code === "ECONNABORTED" ||
-      String(error.message || "").toLowerCase().includes("timeout");
+      String(error.message || "")
+        .toLowerCase()
+        .includes("timeout");
     const normalizedMessage = timeoutLike
       ? "AI suy nghi qua lau (timeout)."
-      : error.response?.data?.error?.message || error.message || "Loi goi AI khong xac dinh.";
+      : error.response?.data?.error?.message ||
+        error.message ||
+        "Loi goi AI khong xac dinh.";
 
     console.error("[ai.service] Error:", error.response?.data || error.message);
 
@@ -393,7 +533,10 @@ async function getBetterImagePrompt(topic, options = {}) {
       throw new Error("Missing GOOGLE_API_KEY (or GOOGLE_AI_KEY)");
     }
 
-    const modelName = options.model || process.env.GEMINI_IMAGE_PROMPT_MODEL || "gemini-2.5-flash";
+    const modelName =
+      options.model ||
+      process.env.GEMINI_IMAGE_PROMPT_MODEL ||
+      "gemini-2.5-flash";
     const genAI = new GoogleGenerativeAI(googleKey);
     const model = genAI.getGenerativeModel({ model: modelName });
 

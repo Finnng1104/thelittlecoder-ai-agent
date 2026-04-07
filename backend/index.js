@@ -1,3 +1,5 @@
+const fs = require("fs");
+const path = require("path");
 require("dotenv").config();
 const cron = require("node-cron");
 const { Telegraf, Markup } = require("telegraf");
@@ -37,10 +39,14 @@ const telegramToken = process.env.TELEGRAM_TOKEN;
 const draftStore = new Map();
 const publishedPostStore = new Map();
 const roadmapProposalStore = new Map();
+const draftEditRequestStore = new Map();
 const handledCommandMessages = new Set();
+const processedTextMessageKeys = new Set();
 const TELEGRAM_CAPTION_MAX = 1024;
 const TELEGRAM_MESSAGE_SAFE_LIMIT = 3800;
 let isRoadmapJobRunning = false;
+let botLockFd = null;
+let botLockPath = "";
 const ENABLE_IMAGE_GENERATION = parseBoolean(
   process.env.ENABLE_IMAGE_GENERATION,
   false
@@ -49,6 +55,88 @@ const ENABLE_IMAGE_GENERATION = parseBoolean(
 if (!telegramToken) {
   throw new Error("Missing TELEGRAM_TOKEN in backend/.env");
 }
+
+function processExists(pid) {
+  const numericPid = Number(pid);
+  if (!Number.isFinite(numericPid) || numericPid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(numericPid, 0);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function releaseBotLock() {
+  try {
+    if (botLockFd !== null) {
+      fs.closeSync(botLockFd);
+      botLockFd = null;
+    }
+  } catch (_error) {
+    // no-op
+  }
+
+  try {
+    if (botLockPath && fs.existsSync(botLockPath)) {
+      fs.unlinkSync(botLockPath);
+    }
+  } catch (_error) {
+    // no-op
+  }
+}
+
+function acquireBotLock() {
+  const configuredPath = String(process.env.BOT_LOCK_FILE || ".bot.lock").trim();
+  const lockPath = path.isAbsolute(configuredPath)
+    ? configuredPath
+    : path.resolve(__dirname, configuredPath);
+  botLockPath = lockPath;
+
+  const createLock = () => {
+    botLockFd = fs.openSync(lockPath, "wx");
+    fs.writeFileSync(
+      botLockFd,
+      JSON.stringify(
+        {
+          pid: process.pid,
+          started_at: new Date().toISOString(),
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+  };
+
+  try {
+    createLock();
+    return;
+  } catch (error) {
+    if (error.code !== "EEXIST") {
+      throw error;
+    }
+  }
+
+  try {
+    const raw = fs.readFileSync(lockPath, "utf8");
+    const parsed = JSON.parse(raw);
+    const existingPid = Number(parsed?.pid || 0);
+    if (processExists(existingPid)) {
+      throw new Error(
+        `Another bot process is running (pid=${existingPid}). Stop old process or remove lock: ${lockPath}`
+      );
+    }
+    fs.unlinkSync(lockPath);
+    createLock();
+  } catch (error) {
+    throw new Error(`Failed to acquire bot lock at ${lockPath}: ${error.message}`);
+  }
+}
+
+acquireBotLock();
 
 const bot = new Telegraf(telegramToken, { handlerTimeout: 600000 });
 
@@ -73,6 +161,23 @@ function isCommandHandled(ctx) {
   return handledCommandMessages.has(messageId);
 }
 
+function isDuplicateTextMessage(ctx) {
+  const chatId = String(ctx?.chat?.id || "");
+  const messageId = Number(ctx?.message?.message_id);
+  if (!chatId || !Number.isFinite(messageId)) {
+    return false;
+  }
+
+  const key = `${chatId}:${messageId}`;
+  if (processedTextMessageKeys.has(key)) {
+    return true;
+  }
+
+  processedTextMessageKeys.add(key);
+  setTimeout(() => processedTextMessageKeys.delete(key), 15 * 60 * 1000);
+  return false;
+}
+
 function buildDraftKeyboard() {
   return buildDraftKeyboardWithId("");
 }
@@ -81,6 +186,7 @@ function buildDraftKeyboardWithId(draftId) {
   const id = String(draftId || "").trim();
   if (!id) {
     const rows = [[Markup.button.callback("Duyệt & Đăng bài", "confirm_post")]];
+    rows.push([Markup.button.callback("Chỉnh sửa nội dung", "edit_content")]);
     if (ENABLE_IMAGE_GENERATION) {
       rows.push([Markup.button.callback("Đổi ảnh khác", "regen_image")]);
     }
@@ -89,6 +195,7 @@ function buildDraftKeyboardWithId(draftId) {
   }
 
   const rows = [[Markup.button.callback("Duyệt & Đăng bài", `confirm_post:${id}`)]];
+  rows.push([Markup.button.callback("Chỉnh sửa nội dung", `edit_content:${id}`)]);
   if (ENABLE_IMAGE_GENERATION) {
     rows.push([Markup.button.callback("Đổi ảnh khác", `regen_image:${id}`)]);
   }
@@ -115,6 +222,7 @@ function storeDraft(chatId, payload, options = {}) {
     updatedAt: new Date().toISOString(),
   };
 
+  clearPendingDraftEditRequest(String(chatId));
   draftStore.set(String(chatId), record);
   upsertDraftRecord(record);
   return record;
@@ -160,7 +268,36 @@ function clearDraft(chatId, draftId = "") {
 
   if (!id || current.draftId === id) {
     draftStore.delete(normalizedChatId);
+    clearPendingDraftEditRequest(normalizedChatId);
   }
+}
+
+function setPendingDraftEditRequest(chatId, draftId) {
+  const normalizedChatId = String(chatId || "");
+  const normalizedDraftId = String(draftId || "").trim();
+  if (!normalizedChatId || !normalizedDraftId) {
+    return;
+  }
+  draftEditRequestStore.set(normalizedChatId, {
+    draftId: normalizedDraftId,
+    createdAt: Date.now(),
+  });
+}
+
+function getPendingDraftEditRequest(chatId) {
+  const normalizedChatId = String(chatId || "");
+  if (!normalizedChatId) {
+    return null;
+  }
+  return draftEditRequestStore.get(normalizedChatId) || null;
+}
+
+function clearPendingDraftEditRequest(chatId) {
+  const normalizedChatId = String(chatId || "");
+  if (!normalizedChatId) {
+    return;
+  }
+  draftEditRequestStore.delete(normalizedChatId);
 }
 
 function rememberPublishedPost(chatId, postId) {
@@ -246,6 +383,24 @@ function extractRewriteInput(text) {
   return null;
 }
 
+function shouldRegenerateCurrentRoadmapDraft(text) {
+  const normalized = String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    /huy.*tao\s*lai/.test(normalized) ||
+    /huy.*lam\s*lai/.test(normalized) ||
+    /tao\s*lai.*ban\s*thao/.test(normalized) ||
+    /lam\s*lai.*ban\s*thao/.test(normalized)
+  );
+}
+
 function buildTopicFromRawContent(rawContent) {
   const cleaned = String(rawContent || "")
     .replace(/\s+/g, " ")
@@ -321,12 +476,13 @@ function buildFallbackShortTitle(topic) {
   return words.join(" ");
 }
 
-function buildSeriesImageShortTitle(day, topic, aiShortTitle = "") {
+function buildSeriesImageShortTitle(day, topic, aiShortTitle = "", roadmapImageHint = "") {
   const normalizedDay = Number.isFinite(Number(day)) ? Math.max(1, Math.floor(Number(day))) : 1;
+  const hintRaw = String(roadmapImageHint || "").trim();
   const raw = String(aiShortTitle || "")
     .replace(/^DAY\s*\d+\s*[:\-]?\s*/i, "")
     .trim();
-  const base = raw || buildFallbackShortTitle(topic);
+  const base = hintRaw || raw || buildFallbackShortTitle(topic);
   const compact = String(base)
     .toUpperCase()
     .replace(/[^\w\s-]/g, " ")
@@ -335,7 +491,7 @@ function buildSeriesImageShortTitle(day, topic, aiShortTitle = "") {
     .slice(0, 4)
     .join(" ");
 
-  return `DAY ${normalizedDay} ${compact || "SERIES"}`.trim();
+  return `DAY ${normalizedDay}: ${compact || "SERIES"}`.trim();
 }
 
 function ensureSeriesHeading(postText, day, topic) {
@@ -346,8 +502,7 @@ function ensureSeriesHeading(postText, day, topic) {
     return heading;
   }
 
-  const firstLine = normalizedText.split("\n").find((line) => String(line || "").trim()) || "";
-  if (/^\s*📘\s*DAY\s+\d+\s*:/i.test(firstLine) || /\bDAY\s+\d+\b/i.test(firstLine)) {
+  if (/(^|\n)\s*📘\s*DAY\s+\d+\s*:/i.test(normalizedText)) {
     return normalizedText;
   }
 
@@ -691,6 +846,101 @@ async function runDeletePostFlow(ctx, inputPostId = "") {
   }
 }
 
+async function runDraftEditFeedbackFlow(ctx, feedbackText) {
+  const chatId = String(ctx.chat.id);
+  if (chatId !== ownerChatId()) {
+    return false;
+  }
+
+  const pendingRequest = getPendingDraftEditRequest(chatId);
+  if (!pendingRequest?.draftId) {
+    return false;
+  }
+
+  const feedback = String(feedbackText || "").trim();
+  if (!feedback) {
+    await ctx.reply("Feedback đang trống. Gửi lại nội dung bạn muốn chỉnh sửa nhé.");
+    return true;
+  }
+
+  const draft = resolveDraftByAction(chatId, pendingRequest.draftId);
+  if (!draft) {
+    clearPendingDraftEditRequest(chatId);
+    await ctx.reply("Không tìm thấy bản nháp để chỉnh sửa. Hãy tạo lại bản nháp mới.");
+    return true;
+  }
+
+  const statusMsg = await ctx.reply("[Edit] Đang cập nhật bản thảo theo feedback của bạn...");
+
+  try {
+    const isSeries = Number.isFinite(Number(draft.roadmapDay));
+    const seriesDay = isSeries ? Math.max(1, Math.floor(Number(draft.roadmapDay))) : null;
+    const roadmapItem = draft.roadmapItemId
+      ? findRoadmapItemByTarget(loadRoadmap(), String(draft.roadmapItemId))
+      : null;
+    const seriesHint = String(roadmapItem?.image_hint || "").trim();
+
+    const editPrompt =
+      `Đây là bản thảo hiện tại:\n${draft.postText}\n\n` +
+      `Feedback chỉnh sửa của user:\n${feedback}\n\n` +
+      `${isSeries ? `Day hiện tại: ${seriesDay}\n` : ""}` +
+      `${seriesHint ? `image_hint từ roadmap: ${seriesHint}\n` : ""}` +
+      "Hãy chỉnh lại nội dung theo feedback, giữ đúng ý chính quan trọng và trả về JSON đúng schema.";
+
+    const structuredRaw = await askAI(editPrompt, {
+      systemPrompt: isSeries ? SERIES_POST_PROMPT : REFINE_CONTENT_PROMPT,
+      model:
+        process.env.AI_MODEL ||
+        process.env.OPENROUTER_DEEP_MODEL ||
+        process.env.OPENROUTER_MODEL,
+      temperature: 0.3,
+      timeout: 300000,
+      throwOnError: true,
+    });
+
+    const structured = parseStructuredAiOutput(structuredRaw, draft.topic || "draft");
+    let finalPost = formatForFacebook(structured.post_content);
+    if (isSeries) {
+      finalPost = ensureSeriesHeading(finalPost, seriesDay, draft.topic || "");
+    }
+
+    const updatedImageMeta = {
+      ...(draft.imageMeta || {}),
+      topic: draft.topic || draft.imageMeta?.topic || "",
+      image_short_title: isSeries
+        ? buildSeriesImageShortTitle(
+            seriesDay,
+            draft.topic || draft.imageMeta?.topic || "",
+            structured.image_short_title,
+            seriesHint
+          )
+        : structured.image_short_title || draft.imageMeta?.image_short_title,
+      ant_action: structured.ant_action || draft.imageMeta?.ant_action,
+      log_message: structured.log_message || draft.imageMeta?.log_message,
+    };
+
+    const updatedDraft = storeDraft(
+      chatId,
+      {
+        ...draft,
+        postText: finalPost,
+        imageMeta: updatedImageMeta,
+        lastEditFeedback: feedback,
+      },
+      { draftId: draft.draftId }
+    );
+
+    clearPendingDraftEditRequest(chatId);
+    await sendDraftPreview(ctx, updatedDraft.imageAsset, updatedDraft.postText, updatedDraft.draftId);
+    await updateStatus(ctx, statusMsg, "[Edit] Đã cập nhật bản thảo theo feedback. Bạn duyệt lại giúp mình.");
+    return true;
+  } catch (error) {
+    await updateStatus(ctx, statusMsg, `[Edit] Chỉnh sửa thất bại: ${error.message}`);
+    await ctx.reply("Bạn có thể gửi feedback khác để mình thử chỉnh lại.");
+    return true;
+  }
+}
+
 async function buildDraftFromTopic(topic, options = {}) {
   const onStep = typeof options.onStep === "function" ? options.onStep : async () => {};
   const seriesInfo = options.seriesInfo && typeof options.seriesInfo === "object" ? options.seriesInfo : null;
@@ -699,17 +949,18 @@ async function buildDraftFromTopic(topic, options = {}) {
   const seriesTotal = Number.isFinite(Number(seriesInfo?.total))
     ? Math.max(1, Math.floor(Number(seriesInfo.total)))
     : null;
+  const seriesImageHint = isSeries ? String(seriesInfo?.image_hint || "").trim() : "";
 
-  await onStep(1, `[1/4] Đang quét tin tức quốc tế về: ${topic}...`);
+  await onStep(1, `[1/4] Đang research thông tin mới nhất về: ${topic}...`);
   const research = await researchToday(topic, {
     search_depth: "advanced",
-    max_results: isSeries ? 5 : 8,
-    include_domains: ["vercel.com", "medium.com", "dev.to", "reddit.com"],
+    max_results: isSeries ? 6 : 10,
+    bilingual: true,
   });
 
   await onStep(
     2,
-    `[2/4] Đã quét ${research.totalResults} nguồn. Đang viết bài và tạo JSON theo hiến pháp content...`
+    `[2/4] Đã research ${research.totalResults} nguồn (EN + VI). Đang viết bài và tạo JSON theo hiến pháp content...`
   );
 
   const structuredRaw = await askAI(
@@ -718,12 +969,15 @@ async function buildDraftFromTopic(topic, options = {}) {
         `Day hiện tại: ${seriesDay}\n` +
         `${seriesTotal ? `Tổng số day trong series: ${seriesTotal}\n` : ""}` +
         `Chủ đề Day ${seriesDay}: ${topic}\n` +
+        `${seriesImageHint ? `image_hint từ roadmap: ${seriesImageHint}\n` : ""}` +
         `Dữ liệu research:\n${research.infoText}\n\n` +
-        `Từ khóa tìm kiếm tiếng Anh: ${research.query}\n\n` +
+        `Từ khóa research EN: ${research.queries?.en || research.query}\n` +
+        `Từ khóa research VI: ${research.queries?.vi || research.originalQuery}\n\n` +
         "Hãy viết ngắn gọn, dễ hiểu, đúng format series và trả về JSON schema."
       : `Dữ liệu research gốc:\n${research.infoText}\n\n` +
         `Chủ đề gốc: ${topic}\n` +
-        `Từ khóa tìm kiếm tiếng Anh: ${research.query}\n\n` +
+        `Từ khóa research EN: ${research.queries?.en || research.query}\n` +
+        `Từ khóa research VI: ${research.queries?.vi || research.originalQuery}\n\n` +
         "Hãy tạo output JSON đúng schema yêu cầu. Không trả về markdown, không lời giải thích."),
     {
       systemPrompt: isSeries ? SERIES_POST_PROMPT : DEEP_RESEARCH_PROMPT,
@@ -746,7 +1000,12 @@ async function buildDraftFromTopic(topic, options = {}) {
   const imageMeta = {
     topic,
     image_short_title: isSeries
-      ? buildSeriesImageShortTitle(seriesDay, topic, structured.image_short_title)
+      ? buildSeriesImageShortTitle(
+          seriesDay,
+          topic,
+          structured.image_short_title,
+          seriesImageHint
+        )
       : structured.image_short_title,
     ant_action: structured.ant_action,
     log_message: structured.log_message,
@@ -1121,6 +1380,43 @@ async function runRoadmapClearFlow(ctx, rawArg) {
   await ctx.reply("Đã xóa toàn bộ roadmap.");
 }
 
+async function runRoadmapRegenerateCurrentFlow(ctx) {
+  const chatId = String(ctx.chat.id);
+  if (chatId !== ownerChatId()) {
+    return;
+  }
+
+  const roadmap = loadRoadmap();
+  const draftedItem = findNextRoadmapItem(roadmap, ["drafted"]);
+  if (!draftedItem) {
+    await ctx.reply(
+      "Không có bản nháp roadmap nào đang chờ duyệt để tạo lại."
+    );
+    return;
+  }
+
+  const resetRoadmap = updateRoadmapItem(roadmap, draftedItem.id, {
+    status: "pending",
+    draft_preview_ready: false,
+    regenerated_at: new Date().toISOString(),
+  });
+  saveRoadmap(resetRoadmap);
+
+  deleteDraftRecordById(`rm_${draftedItem.id}`);
+  const currentDraft = draftStore.get(chatId);
+  if (currentDraft?.roadmapItemId === draftedItem.id) {
+    clearDraft(chatId, currentDraft.draftId);
+  }
+
+  await ctx.reply(
+    `[Roadmap] Đã hủy bản nháp Day ${draftedItem.day} và chuẩn bị tạo lại...`
+  );
+  const ok = await runRoadmapNextDraftFlow("manual");
+  if (!ok) {
+    await ctx.reply("[Roadmap] Không tạo lại được bản nháp ở lần chạy này.");
+  }
+}
+
 async function runRoadmapNextDraftFlow(trigger = "manual") {
   if (isRoadmapJobRunning) {
     return false;
@@ -1212,6 +1508,7 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
       seriesInfo: {
         day: next.day,
         total: roadmap.length,
+        image_hint: next.image_hint || "",
       },
     });
     const draftWithRoadmap = {
@@ -1325,6 +1622,8 @@ bot.help((ctx) => {
       "/roadmap_delete <day|id>\n" +
       "/roadmap_clear confirm\n" +
       "/roadmap_next\n" +
+      "/roadmap_regen\n" +
+      "/edit_cancel\n" +
       "/delete <post_id>"
   );
 });
@@ -1339,6 +1638,22 @@ bot.command("rewrite", async (ctx) => {
   markCommandHandled(ctx);
   const rawContent = extractRewriteInput(ctx.message?.text || "");
   await runRewriteFlow(ctx, rawContent || "");
+});
+
+bot.command("edit_cancel", async (ctx) => {
+  markCommandHandled(ctx);
+  if (String(ctx.chat.id) !== ownerChatId()) {
+    return;
+  }
+
+  const pendingRequest = getPendingDraftEditRequest(String(ctx.chat.id));
+  if (!pendingRequest) {
+    await ctx.reply("Hiện không có phiên chỉnh sửa nào đang chờ feedback.");
+    return;
+  }
+
+  clearPendingDraftEditRequest(String(ctx.chat.id));
+  await ctx.reply("Đã hủy chế độ chỉnh sửa nội dung.");
 });
 
 bot.command("roadmap", async (ctx) => {
@@ -1439,9 +1754,21 @@ bot.command("roadmap_clear", async (ctx) => {
   await runRoadmapClearFlow(ctx, arg);
 });
 
+bot.command("roadmap_regen", async (ctx) => {
+  markCommandHandled(ctx);
+  if (String(ctx.chat.id) !== ownerChatId()) {
+    return;
+  }
+  await runRoadmapRegenerateCurrentFlow(ctx);
+});
+
 bot.on("text", async (ctx) => {
   const chatId = String(ctx.chat.id);
   const userText = String(ctx.message.text || "");
+
+  if (isDuplicateTextMessage(ctx)) {
+    return;
+  }
 
   if (isCommandHandled(ctx)) {
     return;
@@ -1453,7 +1780,13 @@ bot.on("text", async (ctx) => {
   }
 
   // Chặn xử lý trùng cho các command đã có bot.command riêng.
-  if (/^\/(?:start|help|delete|rewrite|roadmap(?:_next|_save|_discard|_list|_approve_all|_approve|_edit|_delete|_clear)?)(?:@\w+)?\b/i.test(userText)) {
+  if (/^\/(?:start|help|delete|rewrite|edit_cancel|roadmap(?:_next|_regen|_save|_discard|_list|_approve_all|_approve|_edit|_delete|_clear)?)(?:@\w+)?\b/i.test(userText)) {
+    return;
+  }
+
+  const pendingEdit = getPendingDraftEditRequest(chatId);
+  if (pendingEdit && !userText.startsWith("/")) {
+    await runDraftEditFeedbackFlow(ctx, userText);
     return;
   }
 
@@ -1466,6 +1799,11 @@ bot.on("text", async (ctx) => {
   const rewriteInput = extractRewriteInput(userText);
   if (rewriteInput !== null) {
     await runRewriteFlow(ctx, rewriteInput);
+    return;
+  }
+
+  if (shouldRegenerateCurrentRoadmapDraft(userText)) {
+    await runRoadmapRegenerateCurrentFlow(ctx);
     return;
   }
 
@@ -1536,7 +1874,7 @@ bot.on("text", async (ctx) => {
       return;
     }
 
-    const statusMsg = await ctx.reply(`[1/4] Đang quét tin tức quốc tế về: ${topic}...`);
+    const statusMsg = await ctx.reply(`[1/4] Đang research thông tin mới nhất về: ${topic}...`);
 
     try {
       const draft = await buildDraftFromTopic(topic, {
@@ -1629,6 +1967,30 @@ async function handleRegenImageAction(ctx, draftId = "") {
   );
 
   await sendDraftPreview(ctx, newImageAsset, updatedDraft.postText, updatedDraft.draftId);
+}
+
+async function handleEditContentAction(ctx, draftId = "") {
+  const chatId = String(ctx.chat?.id || "");
+
+  if (chatId !== ownerChatId()) {
+    await ctx.answerCbQuery("Bạn không có quyền này.", { show_alert: true });
+    return;
+  }
+
+  const draft = resolveDraftByAction(chatId, draftId);
+  if (!draft) {
+    await ctx.answerCbQuery("Không tìm thấy bản thảo để chỉnh sửa.", {
+      show_alert: true,
+    });
+    return;
+  }
+
+  setPendingDraftEditRequest(chatId, draft.draftId || draftId);
+  await ctx.answerCbQuery("Đã bật chế độ chỉnh sửa nội dung.");
+  await ctx.reply(
+    "Gửi feedback chỉnh sửa cho bản thảo (ví dụ: rút ngắn hơn, đổi hook, thêm ví dụ ngắn).\n" +
+      "Khi không muốn chỉnh nữa, dùng /edit_cancel."
+  );
 }
 
 async function handleConfirmPostAction(ctx, draftId = "") {
@@ -1730,6 +2092,11 @@ bot.action(/^regen_image:(.+)$/, async (ctx) => {
   await handleRegenImageAction(ctx, draftId);
 });
 
+bot.action(/^edit_content:(.+)$/, async (ctx) => {
+  const draftId = String(ctx.match?.[1] || "").trim();
+  await handleEditContentAction(ctx, draftId);
+});
+
 bot.action(/^confirm_post:(.+)$/, async (ctx) => {
   const draftId = String(ctx.match?.[1] || "").trim();
   await handleConfirmPostAction(ctx, draftId);
@@ -1743,6 +2110,10 @@ bot.action(/^cancel_post:(.+)$/, async (ctx) => {
 // Backward-compatible handlers for old messages without draftId in callback_data.
 bot.action("regen_image", async (ctx) => {
   await handleRegenImageAction(ctx, "");
+});
+
+bot.action("edit_content", async (ctx) => {
+  await handleEditContentAction(ctx, "");
 });
 
 bot.action("confirm_post", async (ctx) => {
@@ -1759,5 +2130,14 @@ bot.launch().then(() => {
   console.log("[bot] Telegram bot is online and waiting for commands...");
 });
 
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
+process.once("SIGINT", () => {
+  releaseBotLock();
+  bot.stop("SIGINT");
+});
+process.once("SIGTERM", () => {
+  releaseBotLock();
+  bot.stop("SIGTERM");
+});
+process.once("exit", () => {
+  releaseBotLock();
+});
