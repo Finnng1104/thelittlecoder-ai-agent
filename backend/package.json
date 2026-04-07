@@ -4,7 +4,7 @@
   "main": "index.js",
   "license": "MIT",
   "scripts": {
-    "dev": "nodemon index.js",
+    "dev": "nodemon --watch index.js --watch src --ext js,mjs,cjs --ignore roadmap.json --ignore drafts.json index.js",
     "start": "node index.js",
     "check:models": "node scripts/check-models.js"
   },

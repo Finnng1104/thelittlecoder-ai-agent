@@ -93,6 +93,58 @@ Yeu cau bat buoc:
 }
 `.trim();
 
+const ROADMAP_GENERATOR_PROMPT = `
+[TASK]
+Phân rã chủ đề học tập thành một lộ trình nội dung theo thứ tự dễ -> khó.
+Số lượng bài PHẢI phù hợp độ rộng/chuyên sâu của chủ đề, KHÔNG cố định.
+
+[RULES]
+1. Trả về DUY NHẤT một JSON Array.
+2. Mỗi phần tử phải có:
+   - day (số thứ tự ngày, bắt đầu từ 1)
+   - topic (tiêu đề bài viết cụ thể, rõ ràng)
+   - image_hint (tiêu đề tiếng Anh rất ngắn cho ảnh, 2-4 từ)
+3. Không markdown, không giải thích thêm.
+4. Tập trung vào thực chiến cho dev (ưu tiên ví dụ thật, bài học làm dự án, lỗi thường gặp).
+5. Không kéo dài roadmap cho đủ số lượng.
+6. Chủ đề hẹp: roadmap ngắn; chủ đề rộng: roadmap dài hơn.
+
+[OUTPUT EXAMPLE]
+[
+  {"day":1,"topic":"Cài đặt môi trường React","image_hint":"REACT SETUP"},
+  {"day":2,"topic":"Hiểu JSX và Virtual DOM","image_hint":"VIRTUAL DOM"}
+]
+`.trim();
+
+const SERIES_POST_PROMPT = `
+${THE_LITTLE_CODER_ENGINE_V2_JSON}
+
+[SERIES MODE]
+Bạn đang viết bài thuộc series roadmap theo ngày.
+Mục tiêu: ngắn gọn, dễ hiểu, vào thẳng trọng tâm, hạn chế màu mè.
+
+[STYLE RULES]
+1. Mở đầu bắt buộc theo format: "📘 DAY {day}: {tiêu đề bài}".
+2. Nội dung NGẮN GỌN, DỄ HIỂU, tránh dài dòng.
+3. Ưu tiên dạng "đọc nhanh là làm được": định nghĩa ngắn, 2-4 ý chính, 1 ví dụ cực ngắn.
+4. Không viết lan man kiểu blog dài.
+5. Dùng tiếng Việt tự nhiên, giữ thuật ngữ kỹ thuật tiếng Anh khi cần.
+6. Kết bài bằng 1 câu hỏi ngắn để mời thảo luận.
+
+[OUTPUT]
+Trả về JSON đúng schema:
+{
+  "post_content": "...",
+  "image_short_title": "...",
+  "ant_action": "...",
+  "log_message": "..."
+}
+
+Yêu cầu riêng:
+- image_short_title phải ngắn, dễ đọc trên ảnh, dạng series: "DAY {day} {SHORT TITLE}".
+- Không markdown, không giải thích ngoài JSON.
+`.trim();
+
 const IMAGE_PROMPT_SYSTEM = `
 You are a senior prompt engineer for The Little Coder visual identity.
 Return only one final English image prompt for Flux/Imagen.
@@ -372,5 +424,7 @@ module.exports = {
   askAI,
   DEEP_RESEARCH_PROMPT,
   REFINE_CONTENT_PROMPT,
+  ROADMAP_GENERATOR_PROMPT,
+  SERIES_POST_PROMPT,
   getBetterImagePrompt,
 };
