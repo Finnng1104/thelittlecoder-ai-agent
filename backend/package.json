@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "nodemon --watch index.js --watch src --ext js,mjs,cjs --ignore roadmap.json --ignore drafts.json index.js",
     "start": "node index.js",
@@ -15,6 +18,7 @@
     "dotenv": "^17.4.0",
     "express": "^5.2.1",
     "node-cron": "^4.2.1",
+    "pg": "^8.20.0",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {

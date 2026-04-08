@@ -118,16 +118,22 @@ Số lượng bài PHẢI phù hợp độ rộng/chuyên sâu của chủ đề
    - day (số thứ tự ngày, bắt đầu từ 1)
    - topic (tiêu đề bài viết cụ thể, rõ ràng)
    - image_hint (tiêu đề tiếng Anh rất ngắn cho ảnh, 2-4 từ)
+   - type (chỉ nhận: "study" | "talk" | "summary")
 3. Không markdown, không giải thích thêm.
 4. Tập trung vào thực chiến cho dev (ưu tiên ví dụ thật, bài học làm dự án, lỗi thường gặp).
 5. Không kéo dài roadmap cho đủ số lượng.
 6. Chủ đề hẹp: roadmap ngắn; chủ đề rộng: roadmap dài hơn.
-7. RESPONSE PHẢI LÀ MỘT JSON STRING HỢP LỆ. KHÔNG CÓ VĂN BẢN THỪA, KHÔNG BỌC TRONG MARKDOWN CODE BLOCKS (\`\`\`).
+7. Quy tắc type:
+   - study: bài học kỹ thuật, tutorial, thực hành code
+   - talk: bài tâm sự, chia sẻ trải nghiệm, góc nhìn nghề
+   - summary: bài tổng kết tuần/chặng, nhìn lại tiến độ
+8. Nếu chủ đề đầu vào yêu cầu một type cụ thể thì toàn bộ item phải dùng đúng type đó.
+9. RESPONSE PHẢI LÀ MỘT JSON STRING HỢP LỆ. KHÔNG CÓ VĂN BẢN THỪA, KHÔNG BỌC TRONG MARKDOWN CODE BLOCKS (\`\`\`).
 
 [OUTPUT EXAMPLE]
 [
-  {"day":1,"topic":"Cài đặt môi trường React","image_hint":"REACT SETUP"},
-  {"day":2,"topic":"Hiểu JSX và Virtual DOM","image_hint":"VIRTUAL DOM"}
+  {"day":1,"topic":"Cài đặt môi trường React","image_hint":"REACT SETUP","type":"study"},
+  {"day":2,"topic":"Hiểu JSX và Virtual DOM","image_hint":"VIRTUAL DOM","type":"study"}
 ]
 `.trim();
 

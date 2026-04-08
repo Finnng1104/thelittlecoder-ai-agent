@@ -30,10 +30,21 @@ const {
   resolveRoadmapPath,
 } = require("./src/services/roadmap.service");
 const {
+  resolveDraftFilePath,
   upsertDraftRecord,
   getDraftRecordById,
   deleteDraftRecordById,
+  countPersistedDraftRecords,
+  clearAllDraftRecords,
 } = require("./src/services/draft.service");
+const {
+  assertStorageConfiguration,
+  clearAllPostgresData,
+  isPostgresStorageEnabled,
+  resolveStorageDriver,
+  resolvePostgresDescriptor,
+  countAppStateRows,
+} = require("./src/services/db.service");
 
 function firstNonEmpty(...values) {
   for (const value of values) {
@@ -94,6 +105,8 @@ const ENABLE_IMAGE_GENERATION = parseBoolean(
   process.env.ENABLE_IMAGE_GENERATION,
   false
 );
+
+assertStorageConfiguration();
 
 if (!telegramToken) {
   throw new Error(
@@ -259,7 +272,7 @@ function createDraftId(prefix = "draft") {
   return `${safePrefix}_${ts}_${rnd}`;
 }
 
-function storeDraft(chatId, payload, options = {}) {
+async function storeDraft(chatId, payload, options = {}) {
   const id = String(options.draftId || payload?.draftId || createDraftId(payload?.source || "draft"));
   const record = {
     ...payload,
@@ -271,11 +284,11 @@ function storeDraft(chatId, payload, options = {}) {
 
   clearPendingDraftEditRequest(String(chatId));
   draftStore.set(String(chatId), record);
-  upsertDraftRecord(record);
+  await upsertDraftRecord(record);
   return record;
 }
 
-function resolveDraftByAction(chatId, draftId) {
+async function resolveDraftByAction(chatId, draftId) {
   const normalizedChatId = String(chatId || "");
   const id = String(draftId || "").trim();
   const current = draftStore.get(normalizedChatId);
@@ -288,7 +301,7 @@ function resolveDraftByAction(chatId, draftId) {
     return current;
   }
 
-  const persisted = getDraftRecordById(id);
+  const persisted = await getDraftRecordById(id);
   if (!persisted) {
     return null;
   }
@@ -301,11 +314,11 @@ function resolveDraftByAction(chatId, draftId) {
   return persisted;
 }
 
-function clearDraft(chatId, draftId = "") {
+async function clearDraft(chatId, draftId = "") {
   const normalizedChatId = String(chatId || "");
   const id = String(draftId || "").trim();
   if (id) {
-    deleteDraftRecordById(id);
+    await deleteDraftRecordById(id);
   }
 
   const current = draftStore.get(normalizedChatId);
@@ -683,8 +696,23 @@ function parseRoadmapOutput(rawText, sourceTopic) {
 function formatRoadmapSummary(items) {
   const rows = Array.isArray(items) ? items : [];
   return rows
-    .map((item) => `${item.day}. ${item.topic}`)
+    .map((item, index) => {
+      const type = resolveRoadmapSeriesType(item);
+      const dayLabel =
+        type === "study" && Number.isFinite(Number(item?.day))
+          ? `Day ${Number(item.day)}`
+          : `Talk ${index + 1}`;
+      return `${dayLabel}. [${type}] ${item.topic}`;
+    })
     .join("\n");
+}
+
+function formatRoadmapItemLabel(item) {
+  const type = resolveRoadmapSeriesType(item);
+  if (type === "study" && Number.isFinite(Number(item?.day))) {
+    return `Day ${Number(item.day)}`;
+  }
+  return `Talk (${String(item?.id || "").slice(0, 8) || "no-id"})`;
 }
 
 function formatRoadmapList(items, options = {}) {
@@ -699,10 +727,25 @@ function formatRoadmapList(items, options = {}) {
   }
 
   const lines = filtered
-    .sort((a, b) => Number(a.day || 0) - Number(b.day || 0))
+    .sort((a, b) => {
+      const typeA = resolveRoadmapSeriesType(a);
+      const typeB = resolveRoadmapSeriesType(b);
+      const groupA = typeA === "study" ? 0 : 1;
+      const groupB = typeB === "study" ? 0 : 1;
+      if (groupA !== groupB) {
+        return groupA - groupB;
+      }
+      const dayA = Number(a?.day || Number.MAX_SAFE_INTEGER);
+      const dayB = Number(b?.day || Number.MAX_SAFE_INTEGER);
+      if (dayA !== dayB) {
+        return dayA - dayB;
+      }
+      return String(a?.id || "").localeCompare(String(b?.id || ""));
+    })
     .map(
       (item) =>
-        `Day ${item.day} | ${String(item.status || "unknown").toUpperCase()}\n` +
+        `${resolveRoadmapSeriesType(item) === "study" ? `Day ${item.day}` : "Talk"} | ${String(item.status || "unknown").toUpperCase()}\n` +
+        `type: ${resolveRoadmapSeriesType(item)}\n` +
         `id: ${item.id}\n` +
         `topic: ${item.topic}\n` +
         `${item.image_hint ? `image_hint: ${item.image_hint}` : ""}`
@@ -725,6 +768,151 @@ function parsePositiveInt(value, defaultValue = 0) {
     return defaultValue;
   }
   return parsed;
+}
+
+function toAsciiLower(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function normalizeRoadmapSeriesType(value) {
+  const raw = toAsciiLower(value);
+  if (!raw) {
+    return "";
+  }
+
+  if (["study", "learn", "learning", "hoc", "study_series"].includes(raw)) {
+    return "study";
+  }
+  if (["talk", "story", "sharing", "chia-se", "tamsu", "tam-su"].includes(raw)) {
+    return "talk";
+  }
+  if (["summary", "review", "weekly-summary", "tong-ket", "tongket"].includes(raw)) {
+    return "summary";
+  }
+
+  return "";
+}
+
+function inferRoadmapSeriesTypeFromTopic(topic) {
+  const normalized = toAsciiLower(topic);
+  if (!normalized) {
+    return "study";
+  }
+
+  if (/(tong ket|nhin lai|recap|weekly review|review tuan)/.test(normalized)) {
+    return "summary";
+  }
+
+  if (/(tam su|chia se|hanh trinh|cau chuyen|cam nhan|kinh nghiem|lessons learned)/.test(normalized)) {
+    return "talk";
+  }
+
+  return "study";
+}
+
+function resolveRoadmapSeriesType(item) {
+  const explicit = normalizeRoadmapSeriesType(item?.series_type || item?.type);
+  if (explicit) {
+    return explicit;
+  }
+  return inferRoadmapSeriesTypeFromTopic(item?.topic || "");
+}
+
+function getWeekdayIndexInTimezone(date, timezone) {
+  const tz = String(timezone || "").trim() || "Asia/Ho_Chi_Minh";
+  try {
+    const weekdayShort = new Intl.DateTimeFormat("en-US", {
+      weekday: "short",
+      timeZone: tz,
+    }).format(date);
+    const map = {
+      Sun: 0,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    };
+    if (Object.prototype.hasOwnProperty.call(map, weekdayShort)) {
+      return map[weekdayShort];
+    }
+  } catch (_error) {
+    // fallback below
+  }
+  return date.getDay();
+}
+
+function getRoadmapScheduleRuleForDate(date, timezone) {
+  const weekday = getWeekdayIndexInTimezone(date, timezone);
+
+  // Thu 2,3,5,7 -> học (Mon,Tue,Thu,Sat)
+  if ([1, 2, 4, 6].includes(weekday)) {
+    return {
+      key: "study_days",
+      label: "Thứ 2/3/5/7 (series học)",
+      preferredTypes: ["study"],
+    };
+  }
+
+  // Thu 4,6,CN -> tâm sự/tổng kết nhẹ nhàng
+  return {
+    key: "talk_days",
+    label: "Thứ 4/6/CN (series tâm sự)",
+    preferredTypes: ["talk", "summary"],
+  };
+}
+
+function findNextRoadmapItemBySchedule(items, statuses = ["pending"], options = {}) {
+  const rows = Array.isArray(items) ? items : [];
+  const allowedStatus = new Set((Array.isArray(statuses) ? statuses : ["pending"]).map(String));
+  const timezone = String(options.timezone || process.env.ROADMAP_TIMEZONE || "Asia/Ho_Chi_Minh");
+  const allowCrossTypeFallback = parseBoolean(
+    options.allowCrossTypeFallback ?? process.env.ROADMAP_ALLOW_CROSS_TYPE_FALLBACK,
+    false
+  );
+
+  const rule = getRoadmapScheduleRuleForDate(new Date(), timezone);
+  const preferredTypeSet = new Set(rule.preferredTypes);
+
+  const pendingRows = rows
+    .filter((item) => allowedStatus.has(String(item?.status || "pending")))
+    .sort((a, b) => {
+      const typeA = resolveRoadmapSeriesType(a);
+      const typeB = resolveRoadmapSeriesType(b);
+      const dayA = Number(a?.day || Number.MAX_SAFE_INTEGER);
+      const dayB = Number(b?.day || Number.MAX_SAFE_INTEGER);
+      const createdA = Date.parse(String(a?.created_at || a?.updated_at || "")) || 0;
+      const createdB = Date.parse(String(b?.created_at || b?.updated_at || "")) || 0;
+
+      // Study -> ưu tiên theo day.
+      if (typeA === "study" || typeB === "study") {
+        if (dayA !== dayB) {
+          return dayA - dayB;
+        }
+      }
+
+      // Talk/Summary -> ưu tiên theo thời điểm tạo.
+      if (createdA !== createdB) {
+        return createdA - createdB;
+      }
+      return String(a?.id || "").localeCompare(String(b?.id || ""));
+    });
+
+  const matched = pendingRows.find((item) => preferredTypeSet.has(resolveRoadmapSeriesType(item)));
+  if (matched) {
+    return { item: matched, rule, usedFallback: false };
+  }
+
+  if (!allowCrossTypeFallback) {
+    return { item: null, rule, usedFallback: false };
+  }
+
+  return { item: pendingRows[0] || null, rule, usedFallback: true };
 }
 
 function recoverInterruptedProcessingItems(
@@ -910,7 +1098,7 @@ async function runDraftEditFeedbackFlow(ctx, feedbackText) {
     return true;
   }
 
-  const draft = resolveDraftByAction(chatId, pendingRequest.draftId);
+  const draft = await resolveDraftByAction(chatId, pendingRequest.draftId);
   if (!draft) {
     clearPendingDraftEditRequest(chatId);
     await ctx.reply("Không tìm thấy bản nháp để chỉnh sửa. Hãy tạo lại bản nháp mới.");
@@ -923,7 +1111,10 @@ async function runDraftEditFeedbackFlow(ctx, feedbackText) {
     const isSeries = Number.isFinite(Number(draft.roadmapDay));
     const seriesDay = isSeries ? Math.max(1, Math.floor(Number(draft.roadmapDay))) : null;
     const roadmapItem = draft.roadmapItemId
-      ? findRoadmapItemByTarget(loadRoadmap(), String(draft.roadmapItemId))
+      ? findRoadmapItemByTarget(
+          await loadRoadmap(),
+          String(draft.roadmapItemId)
+        )
       : null;
     const seriesHint = String(roadmapItem?.image_hint || "").trim();
 
@@ -966,7 +1157,7 @@ async function runDraftEditFeedbackFlow(ctx, feedbackText) {
       log_message: structured.log_message || draft.imageMeta?.log_message,
     };
 
-    const updatedDraft = storeDraft(
+    const updatedDraft = await storeDraft(
       chatId,
       {
         ...draft,
@@ -1134,7 +1325,7 @@ async function runRewriteFlow(ctx, rawContent) {
     const imageAsset = ENABLE_IMAGE_GENERATION
       ? await generateImageAsset(imageMeta, "default")
       : null;
-    const draft = storeDraft(chatId, {
+    const draft = await storeDraft(chatId, {
       postText: finalPost,
       topic: imageMeta.topic,
       imageMeta,
@@ -1166,13 +1357,14 @@ function createTelegramCtxProxy(chatId) {
   };
 }
 
-async function runRoadmapCreateFlow(ctx, sourceTopic) {
+async function runRoadmapCreateFlow(ctx, sourceTopic, options = {}) {
   const chatId = String(ctx.chat.id);
   if (chatId !== ownerChatId()) {
     return;
   }
 
   const topic = String(sourceTopic || "").trim();
+  const defaultSeriesType = normalizeRoadmapSeriesType(options.defaultSeriesType || "");
   if (!topic) {
     await ctx.reply("Dùng: /roadmap <chủ đề lớn>. Ví dụ: /roadmap ReactJS từ A-Z");
     return;
@@ -1183,7 +1375,10 @@ async function runRoadmapCreateFlow(ctx, sourceTopic) {
     const rawPlan = await askAI(
       `Chủ đề tổng: ${topic}\n\n` +
         "Hãy tạo roadmap với số lượng bài PHÙ HỢP độ rộng chủ đề (không cố định), " +
-        "trả về đúng JSON Array theo schema yêu cầu.",
+        "trả về đúng JSON Array theo schema yêu cầu.\n" +
+        (defaultSeriesType
+          ? `Toàn bộ bài trong roadmap này bắt buộc thuộc type="${defaultSeriesType}".`
+          : ""),
       {
         systemPrompt: ROADMAP_GENERATOR_PROMPT,
         model:
@@ -1196,7 +1391,11 @@ async function runRoadmapCreateFlow(ctx, sourceTopic) {
       }
     );
 
-    const roadmapItems = parseRoadmapOutput(rawPlan, topic);
+    const roadmapItemsRaw = parseRoadmapOutput(rawPlan, topic);
+    const roadmapItems = roadmapItemsRaw.map((item) => ({
+      ...item,
+      series_type: defaultSeriesType || resolveRoadmapSeriesType(item),
+    }));
     roadmapProposalStore.set(chatId, {
       topic,
       items: roadmapItems,
@@ -1215,10 +1414,12 @@ async function runRoadmapCreateFlow(ctx, sourceTopic) {
     );
     await ctx.reply(
       `Đề xuất này đang chờ bạn duyệt.\n` +
-        `- Lưu đề xuất: /roadmap_save\n` +
+        `- Lưu đề xuất (append): /roadmap_save\n` +
+        `- Lưu đề xuất (ghi đè): /roadmap_save replace\n` +
         `- Bỏ đề xuất: /roadmap_discard\n` +
         `- Duyệt tất cả để chạy lịch: /roadmap_approve_all\n` +
-        `- Duyệt từng bài: /roadmap_approve <day|id>`
+        `- Duyệt từng bài: /roadmap_approve <day|id>\n` +
+        `- Đổi type bài: /roadmap_type <day|id> <study|talk|summary>`
     );
   } catch (error) {
     console.error("[bot] Roadmap create error:", error.message);
@@ -1226,7 +1427,7 @@ async function runRoadmapCreateFlow(ctx, sourceTopic) {
   }
 }
 
-async function runRoadmapSaveFlow(ctx) {
+async function runRoadmapSaveFlow(ctx, rawArg = "") {
   const chatId = String(ctx.chat.id);
   if (chatId !== ownerChatId()) {
     return;
@@ -1238,10 +1439,51 @@ async function runRoadmapSaveFlow(ctx) {
     return;
   }
 
-  saveRoadmap(proposal.items);
+  const saveMode = String(rawArg || "").trim().toLowerCase();
+  const replaceMode = ["replace", "overwrite", "reset"].includes(saveMode);
+
+  let nextItems = proposal.items;
+  if (!replaceMode) {
+    const current = await loadRoadmap();
+    const maxCurrentStudyDay = current.reduce((max, item) => {
+      if (resolveRoadmapSeriesType(item) !== "study") {
+        return max;
+      }
+      const day = Number(item?.day || 0);
+      return Number.isFinite(day) && day > max ? day : max;
+    }, 0);
+
+    let studyOffset = 0;
+    const appended = proposal.items
+      .slice()
+      .map((item) => {
+        const itemType = resolveRoadmapSeriesType(item);
+        const nextItem = {
+          ...item,
+          series_type: itemType,
+          appended_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        if (itemType === "study") {
+          studyOffset += 1;
+          nextItem.day = maxCurrentStudyDay + studyOffset;
+        } else {
+          delete nextItem.day;
+        }
+
+        return nextItem;
+      });
+
+    nextItems = [...current, ...appended];
+  }
+
+  await saveRoadmap(nextItems);
   roadmapProposalStore.delete(chatId);
+  const stats = getRoadmapStats(nextItems);
   await ctx.reply(
-    `[Roadmap] Đã lưu ${proposal.items.length} bài vào ${resolveRoadmapPath()}.\n` +
+    `[Roadmap] Đã ${replaceMode ? "ghi đè" : "append"} ${proposal.items.length} bài vào ${resolveRoadmapPath()}.\n` +
+      `Hiện tại: total=${stats.total}, draft=${stats.draft}, pending=${stats.pending}, drafted=${stats.drafted}, posted=${stats.posted}.\n` +
       `Mặc định đang ở trạng thái DRAFT, bạn duyệt bằng /roadmap_approve hoặc /roadmap_approve_all.`
   );
 }
@@ -1267,7 +1509,7 @@ async function runRoadmapListFlow(ctx, status = "") {
     return;
   }
 
-  const roadmap = loadRoadmap();
+  const roadmap = await loadRoadmap();
   const stats = getRoadmapStats(roadmap);
   const title =
     `[Roadmap] total=${stats.total}, draft=${stats.draft || 0}, pending=${stats.pending}, ` +
@@ -1288,7 +1530,7 @@ async function runRoadmapApproveFlow(ctx, target) {
     return;
   }
 
-  const roadmap = loadRoadmap();
+  const roadmap = await loadRoadmap();
   const found = findRoadmapItemByTarget(roadmap, key);
   if (!found) {
     await ctx.reply(`Không tìm thấy bài với key: ${key}`);
@@ -1299,8 +1541,8 @@ async function runRoadmapApproveFlow(ctx, target) {
     status: "pending",
     approved_at: new Date().toISOString(),
   });
-  saveRoadmap(updated);
-  await ctx.reply(`Đã duyệt Day ${found.day} (${found.topic}) -> PENDING.`);
+  await saveRoadmap(updated);
+  await ctx.reply(`Đã duyệt ${formatRoadmapItemLabel(found)} (${found.topic}) -> PENDING.`);
 }
 
 async function runRoadmapApproveAllFlow(ctx) {
@@ -1309,7 +1551,7 @@ async function runRoadmapApproveAllFlow(ctx) {
     return;
   }
 
-  const roadmap = loadRoadmap();
+  const roadmap = await loadRoadmap();
   if (roadmap.length === 0) {
     await ctx.reply(
       "Roadmap hiện đang rỗng (0 bài). Dùng /roadmap <chủ đề lớn> rồi /roadmap_save trước."
@@ -1331,7 +1573,7 @@ async function runRoadmapApproveAllFlow(ctx) {
     }
     return item;
   });
-  saveRoadmap(updated);
+  await saveRoadmap(updated);
   const stats = getRoadmapStats(updated);
   await ctx.reply(
     `Đã duyệt ${changedCount} bài từ DRAFT/FAILED/PROCESSING -> PENDING.\n` +
@@ -1356,7 +1598,7 @@ async function runRoadmapEditFlow(ctx, rawArg) {
     return;
   }
 
-  const roadmap = loadRoadmap();
+  const roadmap = await loadRoadmap();
   const found = findRoadmapItemByTarget(roadmap, target);
   if (!found) {
     await ctx.reply(`Không tìm thấy bài với key: ${target}`);
@@ -1369,8 +1611,54 @@ async function runRoadmapEditFlow(ctx, rawArg) {
     status: "draft",
     edited_at: new Date().toISOString(),
   });
-  saveRoadmap(updated);
-  await ctx.reply(`Đã sửa Day ${found.day}.\nTopic mới: ${newTopic}\nTrạng thái: DRAFT`);
+  await saveRoadmap(updated);
+  await ctx.reply(`Đã sửa ${formatRoadmapItemLabel(found)}.\nTopic mới: ${newTopic}\nTrạng thái: DRAFT`);
+}
+
+async function runRoadmapSetTypeFlow(ctx, rawArg) {
+  const chatId = String(ctx.chat.id);
+  if (chatId !== ownerChatId()) {
+    return;
+  }
+
+  const text = String(rawArg || "").trim();
+  const [targetRaw, typeRaw] = text.split(/\s+/);
+  const target = String(targetRaw || "").trim();
+  const seriesType = normalizeRoadmapSeriesType(typeRaw || "");
+
+  if (!target || !seriesType) {
+    await ctx.reply("Dùng: /roadmap_type <day|id> <study|talk|summary>");
+    return;
+  }
+
+  const roadmap = await loadRoadmap();
+  const found = findRoadmapItemByTarget(roadmap, target);
+  if (!found) {
+    await ctx.reply(`Không tìm thấy bài với key: ${target}`);
+    return;
+  }
+
+  let nextDayPatch = {};
+  if (seriesType === "study") {
+    const maxStudyDay = roadmap.reduce((max, item) => {
+      if (resolveRoadmapSeriesType(item) !== "study") {
+        return max;
+      }
+      const day = Number(item?.day || 0);
+      return Number.isFinite(day) && day > max ? day : max;
+    }, 0);
+    nextDayPatch = { day: Number(found?.day) || maxStudyDay + 1 };
+  } else {
+    nextDayPatch = { day: undefined };
+  }
+
+  const updated = updateRoadmapItemByTarget(roadmap, target, {
+    series_type: seriesType,
+    ...nextDayPatch,
+    type_set_at: new Date().toISOString(),
+  });
+  await saveRoadmap(updated);
+  await ctx.reply(`Đã cập nhật ${found.id} -> type=${seriesType}.`);
 }
 
 async function runRoadmapDeleteFlow(ctx, target) {
@@ -1385,7 +1673,7 @@ async function runRoadmapDeleteFlow(ctx, target) {
     return;
   }
 
-  const roadmap = loadRoadmap();
+  const roadmap = await loadRoadmap();
   const found = findRoadmapItemByTarget(roadmap, key);
   if (!found) {
     await ctx.reply(`Không tìm thấy bài với key: ${key}`);
@@ -1393,16 +1681,16 @@ async function runRoadmapDeleteFlow(ctx, target) {
   }
 
   const updated = removeRoadmapItemByTarget(roadmap, key);
-  saveRoadmap(updated);
+  await saveRoadmap(updated);
 
   // Xóa luôn draft đã gửi qua Telegram nếu có.
-  deleteDraftRecordById(`rm_${found.id}`);
+  await deleteDraftRecordById(`rm_${found.id}`);
   const currentDraft = draftStore.get(chatId);
   if (currentDraft?.roadmapItemId === found.id) {
-    clearDraft(chatId, currentDraft.draftId);
+    await clearDraft(chatId, currentDraft.draftId);
   }
 
-  await ctx.reply(`Đã xóa Day ${found.day} khỏi roadmap.`);
+  await ctx.reply(`Đã xóa ${formatRoadmapItemLabel(found)} khỏi roadmap.`);
 }
 
 async function runRoadmapClearFlow(ctx, rawArg) {
@@ -1419,12 +1707,89 @@ async function runRoadmapClearFlow(ctx, rawArg) {
     return;
   }
 
-  saveRoadmap([]);
+  await saveRoadmap([]);
   const currentDraft = draftStore.get(chatId);
   if (currentDraft?.source === "roadmap") {
-    clearDraft(chatId, currentDraft.draftId);
+    await clearDraft(chatId, currentDraft.draftId);
   }
   await ctx.reply("Đã xóa toàn bộ roadmap.");
+}
+
+async function runStorageClearFlow(ctx, rawArg) {
+  const chatId = String(ctx.chat.id);
+  if (chatId !== ownerChatId()) {
+    return;
+  }
+
+  const confirm = String(rawArg || "").trim().toLowerCase();
+  if (confirm !== "confirm") {
+    await ctx.reply(
+      "Để xóa toàn bộ dữ liệu lưu trữ, dùng: /storage_clear confirm"
+    );
+    return;
+  }
+
+  if (isPostgresStorageEnabled()) {
+    const cleared = await clearAllPostgresData();
+    if (!cleared) {
+      await ctx.reply("[Storage] Xóa dữ liệu thất bại trên Postgres.");
+      return;
+    }
+  } else {
+    await saveRoadmap([]);
+    await clearAllDraftRecords();
+  }
+
+  draftStore.clear();
+  roadmapProposalStore.clear();
+  draftEditRequestStore.clear();
+  publishedPostStore.clear();
+
+  await ctx.reply(
+    `[Storage] Đã xóa toàn bộ dữ liệu (${isPostgresStorageEnabled() ? "postgres" : "file"}).`
+  );
+}
+
+async function runStorageInfoFlow(ctx) {
+  const chatId = String(ctx.chat.id);
+  if (chatId !== ownerChatId()) {
+    return;
+  }
+
+  const configuredDriver = resolveStorageDriver();
+  const usingPostgres = isPostgresStorageEnabled();
+  const activeBackend = usingPostgres ? "postgres" : "file";
+
+  const roadmap = await loadRoadmap();
+  const roadmapStats = getRoadmapStats(roadmap);
+  const persistedDraftCount = await countPersistedDraftRecords();
+  const appStateRows = usingPostgres ? await countAppStateRows() : 0;
+
+  const fallbackAllowed = parseBoolean(process.env.STORAGE_ALLOW_FILE_FALLBACK, false);
+  const migrateJson = parseBoolean(process.env.STORAGE_MIGRATE_JSON, false);
+
+  const lines = [
+    "[Storage] Trạng thái hiện tại",
+    `- Driver cấu hình: ${configuredDriver}`,
+    `- Backend đang dùng: ${activeBackend}`,
+    `- Fallback file: ${fallbackAllowed ? "ON" : "OFF"}`,
+    `- Auto migrate JSON -> DB: ${migrateJson ? "ON" : "OFF"}`,
+  ];
+
+  if (usingPostgres) {
+    lines.push(`- Postgres: ${resolvePostgresDescriptor()}`);
+    lines.push(`- Bảng app_state: ${appStateRows} row(s)`);
+  } else {
+    lines.push(`- Roadmap file: ${resolveRoadmapPath()}`);
+    lines.push(`- Draft file: ${resolveDraftFilePath()}`);
+  }
+
+  lines.push(
+    `- Roadmap: total=${roadmapStats.total}, draft=${roadmapStats.draft}, pending=${roadmapStats.pending}, drafted=${roadmapStats.drafted}, posted=${roadmapStats.posted}, failed=${roadmapStats.failed}`
+  );
+  lines.push(`- Draft records: ${persistedDraftCount}`);
+
+  await ctx.reply(lines.join("\n"));
 }
 
 async function runRoadmapRegenerateCurrentFlow(ctx) {
@@ -1433,7 +1798,7 @@ async function runRoadmapRegenerateCurrentFlow(ctx) {
     return;
   }
 
-  const roadmap = loadRoadmap();
+  const roadmap = await loadRoadmap();
   const draftedItem = findNextRoadmapItem(roadmap, ["drafted"]);
   if (!draftedItem) {
     await ctx.reply(
@@ -1447,16 +1812,16 @@ async function runRoadmapRegenerateCurrentFlow(ctx) {
     draft_preview_ready: false,
     regenerated_at: new Date().toISOString(),
   });
-  saveRoadmap(resetRoadmap);
+  await saveRoadmap(resetRoadmap);
 
-  deleteDraftRecordById(`rm_${draftedItem.id}`);
+  await deleteDraftRecordById(`rm_${draftedItem.id}`);
   const currentDraft = draftStore.get(chatId);
   if (currentDraft?.roadmapItemId === draftedItem.id) {
-    clearDraft(chatId, currentDraft.draftId);
+    await clearDraft(chatId, currentDraft.draftId);
   }
 
   await ctx.reply(
-    `[Roadmap] Đã hủy bản nháp Day ${draftedItem.day} và chuẩn bị tạo lại...`
+    `[Roadmap] Đã hủy bản nháp ${formatRoadmapItemLabel(draftedItem)} và chuẩn bị tạo lại...`
   );
   const ok = await runRoadmapNextDraftFlow("manual");
   if (!ok) {
@@ -1482,11 +1847,11 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
   let processingItemId = "";
   let processingDay = "";
   try {
-    let roadmap = loadRoadmap();
+    let roadmap = await loadRoadmap();
     const recovered = recoverInterruptedProcessingItems(roadmap);
     if (recovered.recoveredCount > 0) {
       roadmap = recovered.items;
-      saveRoadmap(roadmap);
+      await saveRoadmap(roadmap);
       try {
         await bot.telegram.sendMessage(
           adminChatId,
@@ -1507,19 +1872,28 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
       if (waitingDraft) {
         if (trigger !== "cron") {
           await bot.telegram.sendMessage(
-            adminChatId,
-            `[Roadmap] Day ${waitingDraft.day} đang ở trạng thái DRAFTED, ` +
+          adminChatId,
+          `[Roadmap] ${formatRoadmapItemLabel(waitingDraft)} đang ở trạng thái DRAFTED, ` +
               `hãy duyệt/hủy trước khi tạo bản nháp tiếp theo.`
-          );
+        );
         }
         return false;
       }
     }
 
-    const next = findNextRoadmapItem(roadmap, ["pending"]);
+    const timezone = String(process.env.ROADMAP_TIMEZONE || "Asia/Ho_Chi_Minh").trim();
+    const scheduledPick = findNextRoadmapItemBySchedule(roadmap, ["pending"], {
+      timezone,
+      // Cron chạy theo lịch type. Manual cho phép fallback để dễ test/điều hành.
+      allowCrossTypeFallback: trigger !== "cron",
+    });
+    const next = scheduledPick.item;
     if (!next) {
       if (trigger !== "cron") {
-        await bot.telegram.sendMessage(adminChatId, "[Roadmap] Không còn bài pending.");
+        await bot.telegram.sendMessage(
+          adminChatId,
+          `[Roadmap] Không có bài PENDING khớp lịch hôm nay: ${scheduledPick.rule.label}.`
+        );
       }
       return false;
     }
@@ -1529,14 +1903,17 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
       processing_started_at: new Date().toISOString(),
       last_error: "",
     });
-    saveRoadmap(processingRoadmap);
+    await saveRoadmap(processingRoadmap);
     processingItemId = String(next.id || "");
-    processingDay = String(next.day || "");
+    const nextLabel = formatRoadmapItemLabel(next);
+    processingDay = nextLabel;
 
     const triggerLabel = trigger === "cron" ? "tự động" : "thủ công";
+    const nextSeriesType = resolveRoadmapSeriesType(next);
     statusMessage = await bot.telegram.sendMessage(
       adminChatId,
-      `[Roadmap/${triggerLabel}] Đang xử lý Day ${next.day}: ${next.topic}`
+      `[Roadmap/${triggerLabel}] Đang xử lý ${nextLabel} [${nextSeriesType}]` +
+        `${scheduledPick.usedFallback ? " [fallback]" : ""}: ${next.topic}`
     );
 
     const onStep = async (_index, text) => {
@@ -1545,7 +1922,7 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
           adminChatId,
           statusMessage.message_id,
           undefined,
-          `[Roadmap] Day ${next.day}: ${text}`
+          `[Roadmap] ${nextLabel} [${nextSeriesType}]: ${text}`
         );
       } catch (_error) {
         await bot.telegram.sendMessage(adminChatId, `[Roadmap] ${text}`);
@@ -1555,7 +1932,7 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
     const draft = await buildDraftFromTopic(next.topic, {
       onStep,
       seriesInfo: {
-        day: next.day,
+        day: Number(next.day) || 1,
         total: roadmap.length,
         image_hint: next.image_hint || "",
       },
@@ -1564,18 +1941,19 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
       ...draft,
       source: "roadmap",
       roadmapItemId: next.id,
-      roadmapDay: next.day,
+      roadmapDay: Number(next.day) || undefined,
+      roadmapSeriesType: nextSeriesType,
     };
-    const savedDraft = storeDraft(adminChatId, draftWithRoadmap, {
+    const savedDraft = await storeDraft(adminChatId, draftWithRoadmap, {
       draftId: `rm_${next.id}`,
     });
 
-    const draftedRoadmap = updateRoadmapItem(loadRoadmap(), next.id, {
+    const draftedRoadmap = updateRoadmapItem(await loadRoadmap(), next.id, {
       status: "drafted",
       drafted_at: new Date().toISOString(),
       draft_preview_ready: true,
     });
-    saveRoadmap(draftedRoadmap);
+    await saveRoadmap(draftedRoadmap);
 
     const pseudoCtx = createTelegramCtxProxy(adminChatId);
     await sendDraftPreview(
@@ -1586,19 +1964,20 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
     );
     await bot.telegram.sendMessage(
       adminChatId,
-      `[Roadmap] Day ${next.day} đã có bản thảo. Bấm "Duyệt & Đăng bài" để lên sóng.`
+      `[Roadmap] ${nextLabel} [${nextSeriesType}] đã có bản thảo. ` +
+        `Bấm "Duyệt & Đăng bài" để lên sóng.`
     );
     return true;
   } catch (error) {
     console.error("[roadmap] Auto draft error:", error.message);
     try {
-      const roadmap = loadRoadmap();
+      const roadmap = await loadRoadmap();
       if (processingItemId) {
         const rollback = updateRoadmapItem(roadmap, processingItemId, {
           status: "pending",
           last_error: error.message,
         });
-        saveRoadmap(rollback);
+        await saveRoadmap(rollback);
       }
     } catch (syncError) {
       console.error("[roadmap] rollback error:", syncError.message);
@@ -1609,7 +1988,7 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
         await bot.telegram.sendMessage(
           adminChatId,
           `[Roadmap] Tạo bản nháp thất bại` +
-            `${processingDay ? ` (Day ${processingDay})` : ""}: ${error.message}`
+            `${processingDay ? ` (${processingDay})` : ""}: ${error.message}`
         );
       }
     } catch (_notifyError) {
@@ -1630,22 +2009,56 @@ function initRoadmapScheduler() {
 
   const testIntervalMinutes = parsePositiveInt(process.env.ROADMAP_TEST_INTERVAL_MINUTES, 0);
   const useTestInterval = testIntervalMinutes >= 1 && testIntervalMinutes <= 59;
-  const cronExpr = useTestInterval
-    ? `*/${testIntervalMinutes} * * * *`
-    : String(process.env.ROADMAP_CRON || "0 8 * * *").trim();
   const timezone = String(process.env.ROADMAP_TIMEZONE || "Asia/Ho_Chi_Minh").trim();
 
-  cron.schedule(
-    cronExpr,
-    async () => {
-      await runRoadmapNextDraftFlow("cron");
+  if (useTestInterval) {
+    const cronExpr = `*/${testIntervalMinutes} * * * *`;
+    cron.schedule(
+      cronExpr,
+      async () => {
+        await runRoadmapNextDraftFlow("cron:test");
+      },
+      { timezone }
+    );
+    console.log(
+      `[roadmap] Scheduler enabled: "${cronExpr}" (${timezone}) [test interval=${testIntervalMinutes}m]` +
+        " | type-schedule: T2/T3/T5/T7=study, T4/T6/CN=talk"
+    );
+    return;
+  }
+
+  const scheduleSlots = [
+    {
+      key: "morning",
+      label: "08:00",
+      cronExpr: String(process.env.ROADMAP_CRON_MORNING || "0 8 * * *").trim(),
     },
-    { timezone }
-  );
+    {
+      key: "noon",
+      label: "12:00",
+      cronExpr: String(process.env.ROADMAP_CRON_NOON || "0 12 * * *").trim(),
+    },
+    {
+      key: "night",
+      label: "20:00",
+      cronExpr: String(process.env.ROADMAP_CRON_NIGHT || "0 20 * * *").trim(),
+    },
+  ];
+
+  for (const slot of scheduleSlots) {
+    cron.schedule(
+      slot.cronExpr,
+      async () => {
+        await runRoadmapNextDraftFlow(`cron:${slot.key}`);
+      },
+      { timezone }
+    );
+  }
 
   console.log(
-    `[roadmap] Scheduler enabled: "${cronExpr}" (${timezone})` +
-      (useTestInterval ? ` [test interval=${testIntervalMinutes}m]` : "")
+    `[roadmap] Scheduler enabled (${timezone}): ` +
+      scheduleSlots.map((slot) => `${slot.label}="${slot.cronExpr}"`).join(", ") +
+      " | type-schedule: T2/T3/T5/T7=study, T4/T6/CN=talk"
   );
 }
 
@@ -1657,23 +2070,31 @@ bot.start((ctx) => {
 
 bot.help((ctx) => {
   ctx.reply(
-    "Lệnh hiện tại:\n" +
-      "/start, /help\n" +
-      "/post <chủ đề>\n" +
-      "/rewrite <nội dung thô>\n" +
-      "/roadmap <chủ đề lớn>\n" +
-      "/roadmap_save\n" +
-      "/roadmap_discard\n" +
-      "/roadmap_list [status]\n" +
-      "/roadmap_approve <day|id>\n" +
-      "/roadmap_approve_all\n" +
-      "/roadmap_edit <day|id> | <topic mới>\n" +
-      "/roadmap_delete <day|id>\n" +
-      "/roadmap_clear confirm\n" +
-      "/roadmap_next\n" +
-      "/roadmap_regen\n" +
-      "/edit_cancel\n" +
-      "/delete <post_id>"
+    "Lệnh hiện tại:\n\n" +
+      "1) Tạo bài nhanh\n" +
+      "- /post <chủ đề>: Research + tạo bản thảo để duyệt.\n" +
+      "- /rewrite <nội dung thô>: Viết lại nội dung bạn đưa theo văn phong đã cấu hình.\n" +
+      "- /edit_cancel: Hủy phiên chỉnh sửa bản thảo đang chờ feedback.\n" +
+      "- /delete <post_id>: Xóa bài đã đăng trên Facebook.\n\n" +
+      "2) Quản lý roadmap\n" +
+      "- /roadmap <chủ đề lớn>: Tạo đề xuất roadmap tổng quát.\n" +
+      "- /roadmap_study <chủ đề>: Tạo đề xuất chỉ gồm bài học (study).\n" +
+      "- /roadmap_talk <chủ đề>: Tạo đề xuất chỉ gồm bài tâm sự (talk).\n" +
+      "- /roadmap_summary <chủ đề>: Tạo đề xuất chỉ gồm bài tổng kết (summary).\n" +
+      "- /roadmap_save [replace]: Lưu đề xuất (mặc định append, thêm 'replace' để ghi đè).\n" +
+      "- /roadmap_discard: Bỏ đề xuất chưa lưu.\n" +
+      "- /roadmap_list [status]: Xem danh sách roadmap, có thể lọc status.\n" +
+      "- /roadmap_approve <day|id>: Duyệt 1 bài -> pending.\n" +
+      "- /roadmap_approve_all: Duyệt toàn bộ bài draft/failed/processing -> pending.\n" +
+      "- /roadmap_edit <day|id> | <topic mới>: Sửa topic 1 bài (đưa về draft).\n" +
+      "- /roadmap_type <day|id> <study|talk|summary>: Đổi loại bài.\n" +
+      "- /roadmap_delete <day|id>: Xóa 1 bài khỏi roadmap.\n" +
+      "- /roadmap_clear confirm: Xóa toàn bộ roadmap.\n" +
+      "- /roadmap_next: Chạy tạo bản nháp roadmap kế tiếp ngay.\n" +
+      "- /roadmap_regen: Hủy bản nháp roadmap hiện tại và tạo lại.\n\n" +
+      "3) Storage\n" +
+      "- /storage_info: Xem storage đang dùng (postgres/file) + số liệu hiện tại.\n" +
+      "- /storage_clear confirm: Xóa toàn bộ dữ liệu lưu trữ (roadmap + draft)."
   );
 });
 
@@ -1716,12 +2137,44 @@ bot.command("roadmap", async (ctx) => {
   await runRoadmapCreateFlow(ctx, topic);
 });
 
+bot.command("roadmap_study", async (ctx) => {
+  markCommandHandled(ctx);
+  if (String(ctx.chat.id) !== ownerChatId()) {
+    return;
+  }
+  const text = String(ctx.message?.text || "").trim();
+  const topic = text.replace(/^\/roadmap_study(?:@\w+)?\s*/i, "").trim();
+  await runRoadmapCreateFlow(ctx, topic, { defaultSeriesType: "study" });
+});
+
+bot.command("roadmap_talk", async (ctx) => {
+  markCommandHandled(ctx);
+  if (String(ctx.chat.id) !== ownerChatId()) {
+    return;
+  }
+  const text = String(ctx.message?.text || "").trim();
+  const topic = text.replace(/^\/roadmap_talk(?:@\w+)?\s*/i, "").trim();
+  await runRoadmapCreateFlow(ctx, topic, { defaultSeriesType: "talk" });
+});
+
+bot.command("roadmap_summary", async (ctx) => {
+  markCommandHandled(ctx);
+  if (String(ctx.chat.id) !== ownerChatId()) {
+    return;
+  }
+  const text = String(ctx.message?.text || "").trim();
+  const topic = text.replace(/^\/roadmap_summary(?:@\w+)?\s*/i, "").trim();
+  await runRoadmapCreateFlow(ctx, topic, { defaultSeriesType: "summary" });
+});
+
 bot.command("roadmap_save", async (ctx) => {
   markCommandHandled(ctx);
   if (String(ctx.chat.id) !== ownerChatId()) {
     return;
   }
-  await runRoadmapSaveFlow(ctx);
+  const text = String(ctx.message?.text || "").trim();
+  const arg = text.replace(/^\/roadmap_save(?:@\w+)?\s*/i, "").trim();
+  await runRoadmapSaveFlow(ctx, arg);
 });
 
 bot.command("roadmap_discard", async (ctx) => {
@@ -1783,6 +2236,16 @@ bot.command("roadmap_edit", async (ctx) => {
   await runRoadmapEditFlow(ctx, rawArg);
 });
 
+bot.command("roadmap_type", async (ctx) => {
+  markCommandHandled(ctx);
+  if (String(ctx.chat.id) !== ownerChatId()) {
+    return;
+  }
+  const text = String(ctx.message?.text || "").trim();
+  const rawArg = text.replace(/^\/roadmap_type(?:@\w+)?\s*/i, "").trim();
+  await runRoadmapSetTypeFlow(ctx, rawArg);
+});
+
 bot.command("roadmap_delete", async (ctx) => {
   markCommandHandled(ctx);
   if (String(ctx.chat.id) !== ownerChatId()) {
@@ -1801,6 +2264,24 @@ bot.command("roadmap_clear", async (ctx) => {
   const text = String(ctx.message?.text || "").trim();
   const arg = text.replace(/^\/roadmap_clear(?:@\w+)?\s*/i, "").trim();
   await runRoadmapClearFlow(ctx, arg);
+});
+
+bot.command("storage_clear", async (ctx) => {
+  markCommandHandled(ctx);
+  if (String(ctx.chat.id) !== ownerChatId()) {
+    return;
+  }
+  const text = String(ctx.message?.text || "").trim();
+  const arg = text.replace(/^\/storage_clear(?:@\w+)?\s*/i, "").trim();
+  await runStorageClearFlow(ctx, arg);
+});
+
+bot.command("storage_info", async (ctx) => {
+  markCommandHandled(ctx);
+  if (String(ctx.chat.id) !== ownerChatId()) {
+    return;
+  }
+  await runStorageInfoFlow(ctx);
 });
 
 bot.command("roadmap_regen", async (ctx) => {
@@ -1829,7 +2310,11 @@ bot.on("text", async (ctx) => {
   }
 
   // Chặn xử lý trùng cho các command đã có bot.command riêng.
-  if (/^\/(?:start|help|delete|rewrite|edit_cancel|roadmap(?:_next|_regen|_save|_discard|_list|_approve_all|_approve|_edit|_delete|_clear)?)(?:@\w+)?\b/i.test(userText)) {
+  if (
+    /^\/(?:start|help|delete|rewrite|edit_cancel|storage_clear|storage_info|roadmap(?:_study|_talk|_summary|_next|_regen|_save|_discard|_list|_approve_all|_approve|_edit|_type|_delete|_clear)?)(?:@\w+)?\b/i.test(
+      userText
+    )
+  ) {
     return;
   }
 
@@ -1866,7 +2351,8 @@ bot.on("text", async (ctx) => {
   }
 
   if (userText.startsWith("/roadmap_save")) {
-    await runRoadmapSaveFlow(ctx);
+    const arg = userText.replace(/^\/roadmap_save(?:@\w+)?\s*/i, "").trim();
+    await runRoadmapSaveFlow(ctx, arg);
     return;
   }
 
@@ -1898,6 +2384,12 @@ bot.on("text", async (ctx) => {
     return;
   }
 
+  if (userText.startsWith("/roadmap_type")) {
+    const rawArg = userText.replace(/^\/roadmap_type(?:@\w+)?\s*/i, "").trim();
+    await runRoadmapSetTypeFlow(ctx, rawArg);
+    return;
+  }
+
   if (userText.startsWith("/roadmap_delete")) {
     const target = userText.replace(/^\/roadmap_delete(?:@\w+)?\s*/i, "").trim();
     await runRoadmapDeleteFlow(ctx, target);
@@ -1907,6 +2399,35 @@ bot.on("text", async (ctx) => {
   if (userText.startsWith("/roadmap_clear")) {
     const arg = userText.replace(/^\/roadmap_clear(?:@\w+)?\s*/i, "").trim();
     await runRoadmapClearFlow(ctx, arg);
+    return;
+  }
+
+  if (userText.startsWith("/storage_clear")) {
+    const arg = userText.replace(/^\/storage_clear(?:@\w+)?\s*/i, "").trim();
+    await runStorageClearFlow(ctx, arg);
+    return;
+  }
+
+  if (userText.startsWith("/storage_info")) {
+    await runStorageInfoFlow(ctx);
+    return;
+  }
+
+  if (userText.startsWith("/roadmap_study")) {
+    const topic = userText.replace(/^\/roadmap_study(?:@\w+)?\s*/i, "").trim();
+    await runRoadmapCreateFlow(ctx, topic, { defaultSeriesType: "study" });
+    return;
+  }
+
+  if (userText.startsWith("/roadmap_talk")) {
+    const topic = userText.replace(/^\/roadmap_talk(?:@\w+)?\s*/i, "").trim();
+    await runRoadmapCreateFlow(ctx, topic, { defaultSeriesType: "talk" });
+    return;
+  }
+
+  if (userText.startsWith("/roadmap_summary")) {
+    const topic = userText.replace(/^\/roadmap_summary(?:@\w+)?\s*/i, "").trim();
+    await runRoadmapCreateFlow(ctx, topic, { defaultSeriesType: "summary" });
     return;
   }
 
@@ -1931,7 +2452,7 @@ bot.on("text", async (ctx) => {
           await updateStatus(ctx, statusMsg, text);
         },
       });
-      const savedDraft = storeDraft(chatId, {
+      const savedDraft = await storeDraft(chatId, {
         ...draft,
         source: "manual_post",
       });
@@ -1989,7 +2510,7 @@ async function handleRegenImageAction(ctx, draftId = "") {
     return;
   }
 
-  const draft = resolveDraftByAction(chatId, draftId);
+  const draft = await resolveDraftByAction(chatId, draftId);
   if (!draft) {
     await ctx.answerCbQuery("Không tìm thấy bản thảo (có thể đã hết hạn).", {
       show_alert: true,
@@ -2005,7 +2526,7 @@ async function handleRegenImageAction(ctx, draftId = "") {
   await ctx.answerCbQuery("Đang tạo ảnh mới...");
 
   const newImageAsset = await generateImageAsset(draft.imageMeta || draft.topic, "default");
-  const updatedDraft = storeDraft(
+  const updatedDraft = await storeDraft(
     chatId,
     {
     ...draft,
@@ -2026,7 +2547,7 @@ async function handleEditContentAction(ctx, draftId = "") {
     return;
   }
 
-  const draft = resolveDraftByAction(chatId, draftId);
+  const draft = await resolveDraftByAction(chatId, draftId);
   if (!draft) {
     await ctx.answerCbQuery("Không tìm thấy bản thảo để chỉnh sửa.", {
       show_alert: true,
@@ -2050,7 +2571,7 @@ async function handleConfirmPostAction(ctx, draftId = "") {
     return;
   }
 
-  const draft = resolveDraftByAction(chatId, draftId);
+  const draft = await resolveDraftByAction(chatId, draftId);
   if (!draft) {
     await ctx.answerCbQuery("Không tìm thấy bản thảo để đăng.", { show_alert: true });
     return;
@@ -2075,17 +2596,17 @@ async function handleConfirmPostAction(ctx, draftId = "") {
     rememberPublishedPost(chatId, fbPostId);
 
     if (draft.source === "roadmap" && draft.roadmapItemId) {
-      const roadmap = loadRoadmap();
+      const roadmap = await loadRoadmap();
       const postedRoadmap = updateRoadmapItem(roadmap, draft.roadmapItemId, {
         status: "posted",
         posted_at: new Date().toISOString(),
         facebook_post_id: fbPostId,
         draft_preview_ready: false,
       });
-      saveRoadmap(postedRoadmap);
+      await saveRoadmap(postedRoadmap);
     }
 
-    clearDraft(chatId, draft.draftId || draftId);
+    await clearDraft(chatId, draft.draftId || draftId);
 
     try {
       await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
@@ -2113,18 +2634,18 @@ async function handleCancelPostAction(ctx, draftId = "") {
     return;
   }
 
-  const draft = resolveDraftByAction(chatId, draftId);
+  const draft = await resolveDraftByAction(chatId, draftId);
   if (draft?.source === "roadmap" && draft.roadmapItemId) {
-    const roadmap = loadRoadmap();
+    const roadmap = await loadRoadmap();
     const rollback = updateRoadmapItem(roadmap, draft.roadmapItemId, {
       status: "pending",
       draft_preview_ready: false,
       cancelled_at: new Date().toISOString(),
     });
-    saveRoadmap(rollback);
+    await saveRoadmap(rollback);
   }
 
-  clearDraft(chatId, draft?.draftId || draftId);
+  await clearDraft(chatId, draft?.draftId || draftId);
   await ctx.answerCbQuery("Đã hủy bản thảo.");
 
   try {

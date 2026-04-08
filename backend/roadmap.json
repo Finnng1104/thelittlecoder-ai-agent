@@ -1,192 +1,95 @@
-[
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_1_1775530734037",
-    "day": 1,
-    "topic": "Cài đặt môi trường React với Create React App",
-    "image_hint": "REACT SETUP",
-    "status": "drafted",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.037Z",
-    "updated_at": "2026-04-07T04:28:51.119Z",
-    "approved_at": "2026-04-07T02:59:26.083Z",
-    "processing_started_at": "2026-04-07T04:27:54.452Z",
-    "last_error": "",
-    "drafted_at": "2026-04-07T04:28:51.119Z",
-    "draft_preview_ready": true,
-    "regenerated_at": "2026-04-07T04:14:05.086Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_2_1775530734039",
-    "day": 2,
-    "topic": "Hiểu JSX và tạo Component đầu tiên",
-    "image_hint": "JSX COMPONENT",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T04:14:15.414Z",
-    "approved_at": "2026-04-07T02:59:26.083Z",
-    "processing_started_at": "2026-04-07T03:15:00.014Z",
-    "last_error": "",
-    "drafted_at": "2026-04-07T03:16:03.577Z",
-    "draft_preview_ready": false,
-    "regenerated_at": "2026-04-07T04:14:15.414Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_3_1775530734040",
-    "day": 3,
-    "topic": "Làm việc với Props và truyền dữ liệu",
-    "image_hint": "PROPS DATA",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T04:14:46.681Z",
-    "approved_at": "2026-04-07T02:59:26.083Z",
-    "processing_started_at": "2026-04-07T03:20:00.010Z",
-    "last_error": "",
-    "drafted_at": "2026-04-07T03:21:02.448Z",
-    "draft_preview_ready": false,
-    "regenerated_at": "2026-04-07T04:14:46.681Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_4_1775530734041",
-    "day": 4,
-    "topic": "Quản lý State với useState Hook",
-    "image_hint": "STATE HOOK",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T04:27:50.860Z",
-    "approved_at": "2026-04-07T02:59:26.083Z",
-    "processing_started_at": "2026-04-07T03:25:00.023Z",
-    "last_error": "",
-    "drafted_at": "2026-04-07T03:25:51.020Z",
-    "draft_preview_ready": false,
-    "regenerated_at": "2026-04-07T04:27:50.860Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_5_1775530734042",
-    "day": 5,
-    "topic": "Xử lý sự kiện trong React",
-    "image_hint": "EVENT HANDLING",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T04:27:54.096Z",
-    "approved_at": "2026-04-07T02:59:26.083Z",
-    "processing_started_at": "2026-04-07T03:30:00.006Z",
-    "last_error": "",
-    "drafted_at": "2026-04-07T03:30:59.382Z",
-    "draft_preview_ready": false,
-    "regenerated_at": "2026-04-07T04:27:54.096Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_6_1775530734043",
-    "day": 6,
-    "topic": "Render có điều kiện và toán tử logic",
-    "image_hint": "CONDITIONAL RENDERING",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T02:59:26.083Z",
-    "approved_at": "2026-04-07T02:59:26.083Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_7_1775530734044",
-    "day": 7,
-    "topic": "Render danh sách và sử dụng Key",
-    "image_hint": "LIST KEYS",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T02:59:26.083Z",
-    "approved_at": "2026-04-07T02:59:26.083Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_8_1775530734045",
-    "day": 8,
-    "topic": "Làm việc với Form và Controlled Components",
-    "image_hint": "FORM CONTROLLED",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T02:59:26.083Z",
-    "approved_at": "2026-04-07T02:59:26.083Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_9_1775530734046",
-    "day": 9,
-    "topic": "Side Effects và vòng đời với useEffect",
-    "image_hint": "USEEFFECT HOOK",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T02:59:26.083Z",
-    "approved_at": "2026-04-07T02:59:26.083Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_10_1775530734047",
-    "day": 10,
-    "topic": "Quản lý State phức tạp với useReducer",
-    "image_hint": "USEREDUCER HOOK",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T02:59:26.083Z",
-    "approved_at": "2026-04-07T02:59:26.083Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_11_1775530734048",
-    "day": 11,
-    "topic": "Truyền dữ liệu toàn cục với Context API",
-    "image_hint": "CONTEXT API",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T02:59:26.083Z",
-    "approved_at": "2026-04-07T02:59:26.083Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_12_1775530734049",
-    "day": 12,
-    "topic": "Điều hướng trang với React Router",
-    "image_hint": "REACT ROUTER",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T02:59:26.083Z",
-    "approved_at": "2026-04-07T02:59:26.083Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_13_1775530734050",
-    "day": 13,
-    "topic": "Tái sử dụng logic với Custom Hooks",
-    "image_hint": "CUSTOM HOOKS",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T02:59:26.083Z",
-    "approved_at": "2026-04-07T02:59:26.083Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_14_1775530734051",
-    "day": 14,
-    "topic": "Tối ưu hiệu năng với useMemo và useCallback",
-    "image_hint": "PERFORMANCE OPTIMIZATION",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T02:59:26.083Z",
-    "approved_at": "2026-04-07T02:59:26.083Z"
-  },
-  {
-    "id": "lo-trinh-hoc-reactjs-voi-20-buoi_15_1775530734052",
-    "day": 15,
-    "topic": "Testing Component với React Testing Library",
-    "image_hint": "TESTING COMPONENTS",
-    "status": "pending",
-    "source_topic": "lộ trình học reactjs với 20 buổi",
-    "created_at": "2026-04-07T02:58:54.038Z",
-    "updated_at": "2026-04-07T02:59:26.083Z",
-    "approved_at": "2026-04-07T02:59:26.083Z"
+{
+  "study": [
+    {
+      "id": "study_001_frontend_order",
+      "day": 1,
+      "topic": "Nếu học lại Frontend từ đầu, mình sẽ học theo thứ tự này",
+      "image_hint": "FRONTEND ORDER",
+      "series_type": "study",
+      "status": "draft",
+      "source_topic": "frontend_2026_plan",
+      "created_at": "2026-04-07T09:00:00.000Z",
+      "updated_at": "2026-04-07T09:00:00.000Z"
+    },
+    {
+      "id": "study_002_cursor_shortcuts",
+      "day": 2,
+      "topic": "5 phím tắt Cursor giúp tăng tốc code mỗi ngày",
+      "image_hint": "CURSOR SHORTCUTS",
+      "series_type": "study",
+      "status": "draft",
+      "source_topic": "frontend_2026_plan",
+      "created_at": "2026-04-07T09:00:01.000Z",
+      "updated_at": "2026-04-07T09:00:01.000Z"
+    },
+    {
+      "id": "study_003_nextjs_15_master",
+      "day": 3,
+      "topic": "Làm chủ Next.js 15: App Router, RSC và Data Fetching",
+      "image_hint": "NEXT15 MASTER",
+      "series_type": "study",
+      "status": "draft",
+      "source_topic": "frontend_2026_plan",
+      "created_at": "2026-04-07T09:00:02.000Z",
+      "updated_at": "2026-04-07T09:00:02.000Z"
+    },
+    {
+      "id": "study_004_react_project_real",
+      "day": 4,
+      "topic": "Từ Todo App đến project thực chiến React: lộ trình gọn",
+      "image_hint": "REACT REAL",
+      "series_type": "study",
+      "status": "draft",
+      "source_topic": "frontend_2026_plan",
+      "created_at": "2026-04-07T09:00:03.000Z",
+      "updated_at": "2026-04-07T09:00:03.000Z"
+    },
+    {
+      "id": "study_005_ai_prompt_docs",
+      "day": 5,
+      "topic": "Cách mình dùng AI để đọc Docs tiếng Anh nhanh hơn",
+      "image_hint": "AI DOCS FLOW",
+      "series_type": "study",
+      "status": "draft",
+      "source_topic": "frontend_2026_plan",
+      "created_at": "2026-04-07T09:00:04.000Z",
+      "updated_at": "2026-04-07T09:00:04.000Z"
+    }
+  ],
+  "talk": [
+    {
+      "id": "talk_001_sr_labs_truth",
+      "topic": "Sự thật về nghề Dev tại SR Labs: thứ mình ước biết sớm hơn",
+      "image_hint": "DEV REALITY",
+      "series_type": "talk",
+      "status": "draft",
+      "source_topic": "frontend_2026_plan",
+      "created_at": "2026-04-07T09:05:00.000Z",
+      "updated_at": "2026-04-07T09:05:00.000Z"
+    },
+    {
+      "id": "talk_002_friday_deploy",
+      "topic": "Đừng deploy chiều thứ 6 nếu không muốn mất cuối tuần",
+      "image_hint": "FRIDAY DEPLOY",
+      "series_type": "talk",
+      "status": "draft",
+      "source_topic": "frontend_2026_plan",
+      "created_at": "2026-04-07T09:05:01.000Z",
+      "updated_at": "2026-04-07T09:05:01.000Z"
+    },
+    {
+      "id": "talk_003_weekly_summary",
+      "topic": "Tổng kết tuần: 3 thứ mình làm tốt và 1 lỗi cần sửa",
+      "image_hint": "WEEKLY WRAP",
+      "series_type": "summary",
+      "status": "draft",
+      "source_topic": "frontend_2026_plan",
+      "created_at": "2026-04-07T09:05:02.000Z",
+      "updated_at": "2026-04-07T09:05:02.000Z"
+    }
+  ],
+  "state": {
+    "last_slot_key": "",
+    "last_run_at": ""
   }
-]
+}
