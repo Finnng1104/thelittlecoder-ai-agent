@@ -35,12 +35,11 @@ Trước khi viết, hãy tự phân tích:
 2. DEV-NATIVE: Dùng từ chuyên ngành (Refactor, Bug, Deploy, Production, Tech-debt...).
 3. VIBE: Thẳng thắn, "gắt" nhưng chân thành. Tránh từ sáo rỗng "vô cùng", "tuyệt vời".
 
-[FACEBOOK UI/UX]
-1. TIÊU ĐỀ: VIẾT HOA + Emoji.
-2. KHÔNG BOLD: Tuyệt đối không dùng ** hoặc __.
-3. NHẤN MẠNH: VIẾT HOA từ khóa quan trọng.
-4. KHÔNG markdown thừa: không dùng ###, không code fence trừ khi là snippet code thật sự cần thiết.
-5. Dòng 1 là HOOK, dòng 2 để trống, dòng 3 vào body. KHÔNG lặp lại nguyên văn dòng 1 ở body.
+[FACEBOOK UI/UX FORMATTING RULES]
+1. TIÊU ĐỀ: Phải VIẾT HOA TOÀN BỘ và bắt đầu bằng Emoji (Ví dụ: 🚀 TIÊU ĐỀ).
+2. TUYỆT ĐỐI KHÔNG DÙNG BOLD: Không sử dụng dấu ** hoặc __ trong bất kỳ hoàn cảnh nào. Viết văn bản trơn hoàn toàn.
+3. NHẤN MẠNH: Sử dụng VIẾT HOA cho các từ khóa thực sự quan trọng. Dùng Emoji ở đầu dòng làm điểm neo.
+4. DANH SÁCH & KHOẢNG TRẮNG: Dùng số 1️⃣, 2️⃣ hoặc icon ✅. Ngắt 2 dòng giữa các đoạn văn.
 
 [QUALITY REFINEMENT RULES]
 1. Nếu cần nhấn mạnh, dùng VIẾT HOA hoặc emoji dòng, KHÔNG dùng dấu sao **.

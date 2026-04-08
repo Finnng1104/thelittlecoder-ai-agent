@@ -685,6 +685,139 @@ function extractFirstJsonObject(rawText) {
 }
 
 function extractFirstJsonArray(rawText) {
+  const pickArrayFromObject = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+
+    const preferredKeys = [
+      "roadmap",
+      "items",
+      "data",
+      "results",
+      "result",
+      "list",
+      "plans",
+      "plan",
+    ];
+
+    for (const key of preferredKeys) {
+      if (Array.isArray(value[key])) {
+        return value[key];
+      }
+    }
+
+    for (const nested of Object.values(value)) {
+      if (Array.isArray(nested)) {
+        return nested;
+      }
+    }
+
+    for (const nested of Object.values(value)) {
+      if (!nested || typeof nested !== "object" || Array.isArray(nested)) {
+        continue;
+      }
+      for (const deep of Object.values(nested)) {
+        if (Array.isArray(deep)) {
+          return deep;
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const isRoadmapItemLike = (value) =>
+    Boolean(
+      value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        ("topic" in value ||
+          "day" in value ||
+          "image_hint" in value ||
+          "type" in value),
+    );
+
+  const normalizeParsedToArray = (parsed) => {
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+
+    const wrappedArray = pickArrayFromObject(parsed);
+    if (Array.isArray(wrappedArray)) {
+      return wrappedArray;
+    }
+
+    if (isRoadmapItemLike(parsed)) {
+      return [parsed];
+    }
+
+    return null;
+  };
+
+  const extractRoadmapItemsFromObjectStream = (input) => {
+    const source = String(input || "").trim();
+    if (!source || !source.includes("{")) {
+      return null;
+    }
+
+    const items = [];
+    let depth = 0;
+    let start = -1;
+    let inString = false;
+    let escaping = false;
+
+    for (let i = 0; i < source.length; i += 1) {
+      const ch = source[i];
+
+      if (inString) {
+        if (escaping) {
+          escaping = false;
+          continue;
+        }
+        if (ch === "\\") {
+          escaping = true;
+          continue;
+        }
+        if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (ch === "{") {
+        if (depth === 0) {
+          start = i;
+        }
+        depth += 1;
+        continue;
+      }
+
+      if (ch === "}" && depth > 0) {
+        depth -= 1;
+        if (depth === 0 && start >= 0) {
+          const candidate = source.slice(start, i + 1);
+          try {
+            const parsed = JSON.parse(candidate);
+            if (isRoadmapItemLike(parsed)) {
+              items.push(parsed);
+            }
+          } catch (_error) {
+            // Skip invalid fragment
+          }
+          start = -1;
+        }
+      }
+    }
+
+    return items.length > 0 ? items : null;
+  };
+
   const text = String(rawText || "").trim();
   if (!text) {
     return null;
@@ -695,21 +828,29 @@ function extractFirstJsonArray(rawText) {
   if (fenced) {
     try {
       const parsed = JSON.parse(fenced);
-      if (Array.isArray(parsed)) {
-        return parsed;
+      const normalized = normalizeParsedToArray(parsed);
+      if (normalized) {
+        return normalized;
       }
     } catch (_error) {
-      // Fall through.
+      const streamItems = extractRoadmapItemsFromObjectStream(fenced);
+      if (streamItems) {
+        return streamItems;
+      }
     }
   }
 
   try {
     const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) {
-      return parsed;
+    const normalized = normalizeParsedToArray(parsed);
+    if (normalized) {
+      return normalized;
     }
   } catch (_error) {
-    // Try bracket slice below.
+    const streamItems = extractRoadmapItemsFromObjectStream(text);
+    if (streamItems) {
+      return streamItems;
+    }
   }
 
   const first = text.indexOf("[");
@@ -722,6 +863,29 @@ function extractFirstJsonArray(rawText) {
     } catch (_error) {
       return null;
     }
+  }
+
+  const firstObject = text.indexOf("{");
+  const lastObject = text.lastIndexOf("}");
+  if (firstObject >= 0 && lastObject > firstObject) {
+    const candidate = text.slice(firstObject, lastObject + 1);
+    try {
+      const parsed = JSON.parse(candidate);
+      const normalized = normalizeParsedToArray(parsed);
+      if (normalized) {
+        return normalized;
+      }
+    } catch (_error) {
+      const streamItems = extractRoadmapItemsFromObjectStream(candidate);
+      if (streamItems) {
+        return streamItems;
+      }
+    }
+  }
+
+  const streamItems = extractRoadmapItemsFromObjectStream(text);
+  if (streamItems) {
+    return streamItems;
   }
 
   return null;
@@ -1353,6 +1517,7 @@ async function buildDraftFromTopic(topic, options = {}) {
     timeZone: process.env.ROADMAP_TIMEZONE || "Asia/Ho_Chi_Minh",
   });
 
+  await onStep(1, `[1/5] Đang research thông tin mới nhất về: ${topic}...`);
   const research = await researchToday(topic, {
     search_depth: "advanced",
     max_results: isSeries ? 6 : postIntent === "news" ? 5 : 10,
@@ -1364,10 +1529,10 @@ async function buildDraftFromTopic(topic, options = {}) {
 
   await onStep(
     2,
-    `[2/4] Đã research ${research.totalResults} nguồn (EN + VI). Đang viết bài và tạo JSON theo hiến pháp content...`,
+    `[2/5] Đã research ${research.totalResults} nguồn (EN + VI). Đang viết bản thảo v1...`,
   );
 
-  const structuredRaw = await askAI(
+  const draft1Raw = await askAI(
     isSeries
       ? `Đây là bài thuộc series roadmap.\n` +
           `Day hiện tại: ${seriesDay}\n` +
@@ -1408,8 +1573,31 @@ async function buildDraftFromTopic(topic, options = {}) {
     },
   );
 
-  await onStep(3, "[3/4] Đang parse JSON và dọn đẹp nội dung Facebook...");
-  const structured = parseStructuredAiOutput(structuredRaw, topic);
+  await onStep(3, "[3/5] Đang tự phản biện và tinh chỉnh để loại bỏ văn mẫu AI...");
+
+  const refinedRaw = await askAI(
+    `Đây là bản thảo JSON bạn vừa viết:\n${draft1Raw}\n\n` +
+      "Hãy tự review và chỉnh lại theo style The Little Coder: tự nhiên, thực chiến, bỏ cụm sáo rỗng, giữ ý chính.\n" +
+      "Trả về JSON đúng schema cũ, không giải thích thêm.",
+    {
+      systemPrompt: isSeries
+        ? SERIES_POST_PROMPT
+        : postIntent === "news"
+          ? NEWS_ENGINE_PROMPT
+          : DEEP_RESEARCH_PROMPT,
+      model:
+        process.env.AI_MODEL ||
+        process.env.OPENROUTER_DEEP_MODEL ||
+        process.env.OPENROUTER_MODEL,
+      expectJson: true,
+      temperature: isSeries ? 0.2 : 0.3,
+      timeout: 300000,
+      throwOnError: true,
+    },
+  );
+
+  await onStep(4, "[4/5] Đang parse JSON và dọn đẹp nội dung Facebook...");
+  const structured = parseStructuredAiOutput(refinedRaw, topic);
   let finalPost = formatForFacebook(structured.post_content);
   if (isSeries) {
     finalPost = ensureSeriesHeading(finalPost, seriesDay, topic);
@@ -1431,14 +1619,14 @@ async function buildDraftFromTopic(topic, options = {}) {
   let imageAsset = null;
   if (ENABLE_IMAGE_GENERATION) {
     await onStep(
-      4,
-      "[4/4] Gemini đang tạo banner theo bố cục The Little Coder...",
+      5,
+      "[5/5] Gemini đang tạo banner theo bố cục The Little Coder...",
     );
     imageAsset = await generateImageAsset(imageMeta, "default");
   } else {
     await onStep(
-      4,
-      "[4/4] Đang tắt tạm thời tính năng tạo ảnh, gửi bản nháp text để duyệt...",
+      5,
+      "[5/5] Đang tắt tạm thời tính năng tạo ảnh, gửi bản nháp text để duyệt...",
     );
   }
 
@@ -1579,8 +1767,9 @@ async function runRoadmapCreateFlow(ctx, sourceTopic, options = {}) {
   const statusMsg = await ctx.reply(
     `[Roadmap] Đang tạo lộ trình cho: ${topic}...`,
   );
+  let rawPlan = "";
   try {
-    const rawPlan = await askAI(
+    rawPlan = await askAI(
       `Chủ đề tổng: ${topic}\n\n` +
         "Hãy tạo roadmap với số lượng bài PHÙ HỢP độ rộng chủ đề (không cố định), " +
         "trả về đúng JSON Array theo schema yêu cầu.\n" +
@@ -1632,6 +1821,12 @@ async function runRoadmapCreateFlow(ctx, sourceTopic, options = {}) {
     );
   } catch (error) {
     console.error("[bot] Roadmap create error:", error.message);
+    if (rawPlan) {
+      console.error(
+        "[bot] Roadmap raw AI output preview:",
+        String(rawPlan).slice(0, 600),
+      );
+    }
     await updateStatus(
       ctx,
       statusMsg,
@@ -2680,7 +2875,7 @@ bot.on("text", async (ctx) => {
     }
 
     const statusMsg = await ctx.reply(
-      `[1/4] Đang research thông tin mới nhất về: ${topic}...`,
+      `[1/5] Đang research thông tin mới nhất về: ${topic}...`,
     );
 
     try {
