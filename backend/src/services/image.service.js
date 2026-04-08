@@ -6,6 +6,9 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const INLINE_FALLBACK_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+AP6XqVYxQAAAABJRU5ErkJggg==";
 const DEFAULT_REFERENCE_IMAGE_RELATIVE_PATH = "assets/anh-mau.png";
+const DEFAULT_PANEL_MAIN_TEXT = "REACTJS LÀ GÌ VÀ TẠI SAO NÊN HỌC?";
+const FIXED_PANEL_SUBTEXT = "THE LITTLE CODER | JR FRONTEND DEV";
+const FIXED_DESK_SIGN_TEXT = "THE LITTLE CODER";
 
 function sanitizeTopic(topic) {
   return String(topic || "")
@@ -35,11 +38,11 @@ function stripNoiseWords(topic) {
 function getAntEmotionPrompt(emotion = "default") {
   switch (String(emotion).toLowerCase()) {
     case "confused":
-      return "The ant antennae glow is dim, unstable, and flickering with uneven cyan pulses.";
+      return "The mini robot eye glow is unstable and flickering in cool blue.";
     case "happy":
-      return "The ant antennae glow is bright, stable, and energetic with subtle cyan sparks.";
+      return "The mini robot eye glow is bright, stable, and energetic in crisp blue-white light.";
     default:
-      return "The ant antennae glow is stable, clean, and focused in cyan.";
+      return "The mini robot eye glow is clean, premium, and focused in blue-white.";
   }
 }
 
@@ -63,7 +66,7 @@ function getAntSceneInstructions(topic) {
   if (/(bug|loi|lỗi|fix|debug|error)/i.test(rawTopic)) {
     return {
       antAction:
-        "sitting on the desk, looking confused at the laptop screen, scratching its head with a tiny hand",
+        "sitting at the desk while tilting its head, one hand on keyboard, visibly puzzled by a floating error panel",
       consoleLog: `console.error("Bug found in ${cleanTopic}...");`,
       emotion: "confused",
       cleanTopic,
@@ -77,7 +80,7 @@ function getAntSceneInstructions(topic) {
   ) {
     return {
       antAction:
-        "standing on a small stack of books, looking eager at the neon panel, holding a tiny pencil",
+        "sitting comfortably and typing with focused curiosity, eyes wide and engaged",
       consoleLog: `console.log("Starting journey: ${cleanTopic}...");`,
       emotion: "default",
       cleanTopic,
@@ -86,7 +89,7 @@ function getAntSceneInstructions(topic) {
 
   if (/(nang cao|nâng cao|vuot qua|vượt qua|optimiz|performance|scale|production)/i.test(rawTopic)) {
     return {
-      antAction: "jumping happily on the desk while celebrating with a tiny flag",
+      antAction: "typing rapidly with confident posture, slightly leaning forward with energetic body language",
       consoleLog: `console.log("Feature completed: ${cleanTopic}!");`,
       emotion: "happy",
       cleanTopic,
@@ -102,17 +105,18 @@ function getAntSceneInstructions(topic) {
 }
 
 function buildEnglishTitleHint(topic) {
-  const words = normalizeAscii(topic)
+  const words = String(topic || "")
+    .replace(/\s+/g, " ")
+    .trim()
     .split(" ")
     .filter(Boolean)
-    .slice(0, 4)
-    .map((word) => word.toUpperCase());
+    .slice(0, 12);
 
   if (words.length === 0) {
-    return "WEB DEV INSIGHT";
+    return DEFAULT_PANEL_MAIN_TEXT;
   }
 
-  return words.join(" ");
+  return words.join(" ").toUpperCase();
 }
 
 function resolveImageInput(input) {
@@ -133,22 +137,24 @@ function resolveImageInput(input) {
   };
 }
 
-function sanitizeEnglishTitle(value, fallback) {
-  const normalized = normalizeAscii(value)
-    .toUpperCase()
-    .replace(/[^A-Z0-9\s-]/g, " ")
+function sanitizePanelMainText(value, fallback) {
+  const normalized = String(value || "")
+    .replace(/[\r\n]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  if (!normalized) {
-    return fallback;
+  const source = normalized || String(fallback || "").trim();
+  if (!source) {
+    return DEFAULT_PANEL_MAIN_TEXT;
   }
 
-  return normalized
+  return source
+    .toUpperCase()
     .split(" ")
     .filter(Boolean)
-    .slice(0, 4)
-    .join(" ");
+    .slice(0, 14)
+    .join(" ")
+    .slice(0, 96);
 }
 
 function buildImagePrompt(topicOrPayload, emotion = "default") {
@@ -158,31 +164,42 @@ function buildImagePrompt(topicOrPayload, emotion = "default") {
   const sceneEmotion = emotion === "default" ? scene.emotion : emotion;
   const rawTopic = sanitizeTopic(topic) || "web development topic";
   const hintTitle = buildEnglishTitleHint(topic);
-  const panelTitle = sanitizeEnglishTitle(input.imageShortTitle, hintTitle);
-  const antAction = input.antAction || scene.antAction;
+  const panelTitle = sanitizePanelMainText(input.imageShortTitle, hintTitle);
+  const robotAction = input.antAction || scene.antAction;
   const logMessage = input.logMessage || scene.consoleLog;
 
   return `
-A professional minimalist 3D technology render for a blog banner.
-STRICT LAYOUT (Ref. image_42.png composition):
-- Scene: Centered perspective of a deeply dark room (#111111).
-- Table: A sleek matte black desk with subtle cyan neon light edges.
-- Foreground: A closed matte black laptop facing slightly away, displaying a clean centered teal logo/code: "the little coder".
-- Mascot: A stylized, small, low-poly 3D ant mascot with distinctive, flickering electric cyan antennae. Dynamic action: ${antAction}.
-- Background: A large, centered glowing cyan neon rectangle panel (chalkboard shape) with minimalist cyan mono font text.
-- Panel Icons: centered below the main text are small holographic icons: graduate cap, pencil, small plant.
+A cinematic rendered image in tech-noir style.
+Use attached reference image composition and depth if available.
 
-[CRITICAL DYNAMIC UPDATE]
-- Panel Main Text: Use ENGLISH ONLY. Create one VERY SHORT uppercase title (2-4 words) summarizing topic "${rawTopic}".
-- Preferred style examples: "MIDDLEWARE EXPLAINED", "REACT PROPS DEEP DIVE", "FIX BUGS FAST".
-- Use this exact short title on panel: "${panelTitle}".
-- Small Console Log (bottom-right): ${logMessage}
-- Do NOT use Vietnamese on the panel.
-- Keep panel text clear and unobstructed.
+Main character:
+- An adorable sleek mini robot mascot with large glowing blue eyes, compact rounded body, smooth glossy panels, elegant blue light seams.
+- Wearing a tiny black tech hoodie with a prominent glowing white React logo on the chest.
+- Dynamic action: ${robotAction}.
+- The robot is seated at a sleek matte black desk, focused on typing.
 
-Style: Cinematic tech-noir, sharp geometric edges, clean composition, 16:9 ratio.
-Guardrails: No watermark. No corner logos.
-Mood: ${getAntEmotionPrompt(sceneEmotion)}
+Foreground and branding:
+- Laptop lid must show clear white uppercase text: "REACT JS".
+- On desk near foreground, add one miniature sign with clear uppercase text: "${FIXED_DESK_SIGN_TEXT}".
+- Keep only one visible headphone set on desk. No duplicate headphones.
+
+Floating holographic layer:
+- In front of the laptop, create one complex free-floating cyber holographic panel.
+- Panel main text must be clear uppercase Vietnamese: "${panelTitle}".
+- Panel secondary text must be fixed and clear: "${FIXED_PANEL_SUBTEXT}".
+- Add subtle white-blue floating code snippets around robot.
+- Keep text legible and unobstructed.
+
+Environment:
+- Minimal futuristic creator studio, clean surfaces, premium dual monitors, blurred city night view.
+- Remove glowing wall sign entirely.
+- Color palette: crisp white glow, soft silver metallic tones, cool blue lighting, deep gray shadows.
+- Composition: rule of thirds, subject slightly off-center, layered cinematic depth.
+- Lens and render: wide-angle lens, shallow depth of field, sharp focus on robot + text panels, Unreal Engine 5 style.
+- No watermark, no corner logos.
+- Topic context: ${rawTopic}
+- Small debug vibe line for scene consistency: ${logMessage}
+- Mood tuning: ${getAntEmotionPrompt(sceneEmotion)}
 `
     .replace(/\s+/g, " ")
     .trim();
