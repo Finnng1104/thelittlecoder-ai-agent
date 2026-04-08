@@ -1,6 +1,5 @@
 const fs = require("fs");
 const path = require("path");
-const { createHash, randomUUID, timingSafeEqual } = require("crypto");
 require("dotenv").config();
 const cron = require("node-cron");
 const express = require("express");
@@ -47,8 +46,6 @@ const {
   resolveStorageDriver,
   resolvePostgresDescriptor,
   countAppStateRows,
-  readJsonState,
-  writeJsonState,
 } = require("./src/services/db.service");
 
 function firstNonEmpty(...values) {
@@ -117,10 +114,6 @@ let httpServer = null;
 const ENABLE_IMAGE_GENERATION = parseBoolean(
   process.env.ENABLE_IMAGE_GENERATION,
   false
-);
-const WEBHOOK_GEMINI_ENABLED = parseBoolean(
-  process.env.WEBHOOK_GEMINI_ENABLED,
-  true
 );
 const HTTP_PORT = Number(process.env.PORT || 4000);
 
@@ -792,49 +785,6 @@ function parsePositiveInt(value, defaultValue = 0) {
   return parsed;
 }
 
-function resolveWebhookSecret() {
-  return firstNonEmpty(
-    process.env.WEBHOOK_GEMINI_SECRET,
-    process.env.GEMINI_WEBHOOK_SECRET
-  );
-}
-
-function normalizeWebhookType(value) {
-  const raw = String(value || "").trim().toLowerCase();
-  if (!raw) {
-    return "";
-  }
-  if (["study", "learn", "learning", "hoc"].includes(raw)) {
-    return "study";
-  }
-  if (["talk", "story", "sharing", "tam-su", "tamsu", "meme"].includes(raw)) {
-    return "talk";
-  }
-  if (["summary", "review", "tong-ket", "tongket"].includes(raw)) {
-    return "summary";
-  }
-  return "";
-}
-
-function hashIdempotencyKey(value) {
-  return createHash("sha256")
-    .update(String(value || "").trim())
-    .digest("hex");
-}
-
-function isSameSecret(incoming, expected) {
-  const left = Buffer.from(String(incoming || "").trim(), "utf8");
-  const right = Buffer.from(String(expected || "").trim(), "utf8");
-  if (left.length === 0 || right.length === 0 || left.length !== right.length) {
-    return false;
-  }
-  return timingSafeEqual(left, right);
-}
-
-function buildWebhookDraftId(idempotencyHash) {
-  return `wh_${String(idempotencyHash || "").slice(0, 24)}`;
-}
-
 function toAsciiLower(value) {
   return String(value || "")
     .normalize("NFD")
@@ -1430,151 +1380,6 @@ apiApp.get("/api/health", (_req, res) => {
     storage: isPostgresStorageEnabled() ? "postgres" : "file",
     timestamp: new Date().toISOString(),
   });
-});
-
-apiApp.post("/api/webhook/gemini/v1/content-update", async (req, res) => {
-  const requestId = randomUUID();
-
-  try {
-    if (!WEBHOOK_GEMINI_ENABLED) {
-      return res.status(404).json({
-        status: "error",
-        message: "Webhook disabled",
-        request_id: requestId,
-      });
-    }
-
-    const expectedSecret = resolveWebhookSecret();
-    if (!expectedSecret) {
-      return res.status(503).json({
-        status: "error",
-        message: "Webhook secret is not configured",
-        request_id: requestId,
-      });
-    }
-
-    const incomingSecret = req.headers["x-webhook-secret"];
-    if (!isSameSecret(incomingSecret, expectedSecret)) {
-      return res.status(401).json({
-        status: "error",
-        message: "Unauthorized",
-        request_id: requestId,
-      });
-    }
-
-    const payload = req.body && typeof req.body === "object" ? req.body : {};
-    const type = normalizeWebhookType(payload.type);
-    const topic = String(payload.topic || "").trim();
-    const contentDraft = String(payload.content_draft || "").trim();
-    const imageUrl = String(payload.image_url || "").trim();
-    const imagePrompt = String(payload.image_prompt || "").trim();
-    const idempotencyKey = String(payload.idempotency_key || "").trim();
-    const dayValue = Number(payload.day);
-    const day =
-      Number.isFinite(dayValue) && dayValue > 0 ? Math.floor(dayValue) : undefined;
-
-    if (!type || !topic || !contentDraft || !idempotencyKey) {
-      return res.status(400).json({
-        status: "error",
-        message:
-          "Missing required fields: type, topic, content_draft, idempotency_key",
-        request_id: requestId,
-      });
-    }
-
-    const adminChatId = ownerChatId();
-    if (!adminChatId) {
-      return res.status(503).json({
-        status: "error",
-        message: "Owner chat id is not configured",
-        request_id: requestId,
-      });
-    }
-
-    const idemHash = hashIdempotencyKey(idempotencyKey);
-    const idemStateKey = `webhook_idem:${idemHash}`;
-    const existing = await readJsonState(idemStateKey, null);
-    if (existing?.draft_id) {
-      return res.status(200).json({
-        status: "success",
-        message: "Duplicate request (already processed)",
-        request_id: requestId,
-        draft_id: existing.draft_id,
-      });
-    }
-
-    const draftId = buildWebhookDraftId(idemHash);
-    const imageAsset = imageUrl
-      ? {
-          type: "url",
-          url: imageUrl,
-          source: "webhook_gemini",
-        }
-      : null;
-
-    const postText = formatForFacebook(contentDraft);
-    const savedDraft = await storeDraft(
-      adminChatId,
-      {
-        source: "webhook_gemini",
-        topic,
-        postText,
-        imageAsset,
-        imageUrl: imageUrl || null,
-        roadmapSeriesType: type,
-        roadmapDay: type === "study" ? day : undefined,
-        imageMeta: {
-          topic,
-          image_prompt: imagePrompt,
-          webhook_type: type,
-          webhook_request_id: requestId,
-          image_short_title: String(payload.image_short_title || "").trim(),
-          ant_action: String(payload.ant_action || "").trim(),
-          log_message: String(payload.log_message || "").trim(),
-        },
-        webhookIdempotencyKey: idempotencyKey,
-        webhookRequestId: requestId,
-      },
-      { draftId }
-    );
-
-    await writeJsonState(idemStateKey, {
-      request_id: requestId,
-      draft_id: savedDraft.draftId,
-      created_at: new Date().toISOString(),
-      type,
-      topic,
-    });
-
-    const pseudoCtx = createTelegramCtxProxy(adminChatId);
-    await sendDraftPreview(
-      pseudoCtx,
-      savedDraft.imageAsset,
-      savedDraft.postText,
-      savedDraft.draftId
-    );
-
-    if (imagePrompt) {
-      await bot.telegram.sendMessage(
-        adminChatId,
-        `[Webhook] request_id=${requestId}\nimage_prompt:\n${imagePrompt}`
-      );
-    }
-
-    return res.status(200).json({
-      status: "success",
-      message: "Content received and sent for approval",
-      request_id: requestId,
-      draft_id: savedDraft.draftId,
-    });
-  } catch (error) {
-    console.error(`[webhook] request_id=${requestId} error:`, error.message);
-    return res.status(500).json({
-      status: "error",
-      message: "Internal server error",
-      request_id: requestId,
-    });
-  }
 });
 
 async function runRoadmapCreateFlow(ctx, sourceTopic, options = {}) {
