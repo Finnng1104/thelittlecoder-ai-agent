@@ -40,6 +40,7 @@ Trước khi viết, hãy tự phân tích:
 2. KHÔNG BOLD: Tuyệt đối không dùng ** hoặc __.
 3. NHẤN MẠNH: VIẾT HOA từ khóa quan trọng.
 4. KHÔNG markdown thừa: không dùng ###, không code fence trừ khi là snippet code thật sự cần thiết.
+5. Dòng 1 là HOOK, dòng 2 để trống, dòng 3 vào body. KHÔNG lặp lại nguyên văn dòng 1 ở body.
 
 [QUALITY REFINEMENT RULES]
 1. Nếu cần nhấn mạnh, dùng VIẾT HOA hoặc emoji dòng, KHÔNG dùng dấu sao **.
@@ -83,6 +84,30 @@ NHIỆM VỤ:
 2. Tuyệt đối không lộ ra mình là AI.
 3. Giữ cấu trúc: Câu mở đầu gây chú ý -> Phân tích thực chiến -> Câu hỏi thảo luận.
 4. Tuân thủ chặt output JSON ở trên.
+`.trim();
+
+const NEWS_ENGINE_PROMPT = `
+${THE_LITTLE_CODER_ENGINE_V2_JSON}
+
+[NEWS MODE - THỜI SỰ THỰC CHIẾN]
+Nhiệm vụ: Điểm tin công nghệ dưới góc nhìn thực dụng cho Dev Việt.
+
+[LANGUAGE RULES - UPDATE]
+1. KHÔNG kể chuyện ngày xưa, KHÔNG than thở dài dòng.
+2. Tập trung: "Tin này có gì mới?", "Ảnh hưởng gì tới anh em Dev?", "Nên làm gì tiếp?".
+3. Tông giọng dứt khoát, cảnh báo/gợi mở hành động, tránh sáo rỗng.
+
+[STRUCTURE]
+1. Hook ngắn, gắt, nêu tác động thực tế.
+2. Body 2-3 điểm tin ngắn (bullet). Mỗi điểm phải có 1 insight cho Dev.
+3. Kết bằng 1 câu hỏi thảo luận.
+
+[QUALITY CHECK]
+- Nếu tin về AI: nhắc rõ "Biết dùng AI là STANDARD, không phải option".
+- Nếu tin về framework: nhắc rõ "Nền tảng quan trọng hơn version".
+
+[OUTPUT]
+Trả về JSON đúng schema, không văn bản thừa.
 `.trim();
 
 const REFINE_CONTENT_PROMPT = `
@@ -330,9 +355,31 @@ function shouldRetryWithAnotherModel(error) {
 }
 
 function tryExtractJsonOnlyContent(rawText) {
-  const text = String(rawText || "").trim();
+  let text = String(rawText || "").trim();
   if (!text) {
     return text;
+  }
+
+  // Dọn phần tiền tố kiểu: "Sure, here is the JSON..."
+  if (text.includes("{")) {
+    const first = text.indexOf("{");
+    const last = text.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      text = text.slice(first, last + 1).trim();
+    }
+  } else if (text.includes("[")) {
+    const first = text.indexOf("[");
+    const last = text.lastIndexOf("]");
+    if (first >= 0 && last > first) {
+      text = text.slice(first, last + 1).trim();
+    }
+  }
+
+  try {
+    JSON.parse(text);
+    return text;
+  } catch (_error) {
+    // fallback strategies below
   }
 
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
@@ -583,6 +630,7 @@ async function getBetterImagePrompt(topic, options = {}) {
 module.exports = {
   askAI,
   DEEP_RESEARCH_PROMPT,
+  NEWS_ENGINE_PROMPT,
   REFINE_CONTENT_PROMPT,
   ROADMAP_GENERATOR_PROMPT,
   SERIES_POST_PROMPT,

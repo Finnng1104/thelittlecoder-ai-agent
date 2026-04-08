@@ -6,9 +6,44 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const INLINE_FALLBACK_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+AP6XqVYxQAAAABJRU5ErkJggg==";
 const DEFAULT_REFERENCE_IMAGE_RELATIVE_PATH = "assets/anh-mau.png";
-const DEFAULT_PANEL_MAIN_TEXT = "REACTJS LÀ GÌ VÀ TẠI SAO NÊN HỌC?";
+const DEFAULT_PANEL_MAIN_TEXT = "WHAT IS REACTJS";
 const FIXED_PANEL_SUBTEXT = "THE LITTLE CODER | JR FRONTEND DEV";
 const FIXED_DESK_SIGN_TEXT = "THE LITTLE CODER";
+const VI_TO_EN_TOKEN_MAP = {
+  tin: "NEWS",
+  tuc: "UPDATE",
+  cong: "TECH",
+  nghe: "TECH",
+  lap: "CODE",
+  trinh: "CODE",
+  huong: "GUIDE",
+  dan: "GUIDE",
+  hoc: "LEARN",
+  bai: "LESSON",
+  co: "BASIC",
+  ban: "BASIC",
+  nang: "ADVANCED",
+  cao: "ADVANCED",
+  toi: "OPTIMIZE",
+  uu: "OPTIMIZE",
+  hieu: "UNDERSTAND",
+  la: "IS",
+  gi: "WHAT",
+  tai: "WHY",
+  sao: "WHY",
+  loi: "BUG",
+  bug: "BUG",
+  react: "REACT",
+  nextjs: "NEXTJS",
+  javascript: "JAVASCRIPT",
+  typescript: "TYPESCRIPT",
+  frontend: "FRONTEND",
+  backend: "BACKEND",
+  middleware: "MIDDLEWARE",
+  roadmap: "ROADMAP",
+  ai: "AI",
+  agent: "AGENT",
+};
 
 function sanitizeTopic(topic) {
   return String(topic || "")
@@ -25,6 +60,10 @@ function normalizeAscii(text) {
     .trim();
 }
 
+function toAsciiLower(value) {
+  return normalizeAscii(value).toLowerCase();
+}
+
 function stripNoiseWords(topic) {
   return normalizeAscii(topic)
     .replace(
@@ -32,6 +71,29 @@ function stripNoiseWords(topic) {
       " "
     )
     .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasVietnameseDiacritics(text) {
+  return /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(
+    String(text || "")
+  );
+}
+
+function looksVietnameseByKeywords(text) {
+  const normalized = ` ${toAsciiLower(text)} `;
+  return /( tin tuc | cong nghe | lap trinh | huong dan | bai hoc | bai viet | tam su | hanh trinh | cho anh em | cho newbie )/.test(
+    normalized
+  );
+}
+
+function compactUpperTitle(tokens, maxWords = 8, maxLength = 72) {
+  return tokens
+    .map((token) => String(token || "").trim().toUpperCase())
+    .filter(Boolean)
+    .slice(0, maxWords)
+    .join(" ")
+    .slice(0, maxLength)
     .trim();
 }
 
@@ -61,13 +123,14 @@ function pickDeterministicPosition(topic) {
 
 function getAntSceneInstructions(topic) {
   const rawTopic = String(topic || "").toLowerCase();
+  const englishTopic = buildEnglishTitleHint(topic).toLowerCase();
   const cleanTopic = stripNoiseWords(topic) || "software engineering";
 
   if (/(bug|loi|lỗi|fix|debug|error)/i.test(rawTopic)) {
     return {
       antAction:
         "sitting at the desk while tilting its head, one hand on keyboard, visibly puzzled by a floating error panel",
-      consoleLog: `console.error("Bug found in ${cleanTopic}...");`,
+      consoleLog: `console.error("Bug found in ${englishTopic}...");`,
       emotion: "confused",
       cleanTopic,
     };
@@ -81,7 +144,7 @@ function getAntSceneInstructions(topic) {
     return {
       antAction:
         "sitting comfortably and typing with focused curiosity, eyes wide and engaged",
-      consoleLog: `console.log("Starting journey: ${cleanTopic}...");`,
+      consoleLog: `console.log("Starting journey: ${englishTopic}...");`,
       emotion: "default",
       cleanTopic,
     };
@@ -90,7 +153,7 @@ function getAntSceneInstructions(topic) {
   if (/(nang cao|nâng cao|vuot qua|vượt qua|optimiz|performance|scale|production)/i.test(rawTopic)) {
     return {
       antAction: "typing rapidly with confident posture, slightly leaning forward with energetic body language",
-      consoleLog: `console.log("Feature completed: ${cleanTopic}!");`,
+      consoleLog: `console.log("Feature completed: ${englishTopic}!");`,
       emotion: "happy",
       cleanTopic,
     };
@@ -98,25 +161,42 @@ function getAntSceneInstructions(topic) {
 
   return {
     antAction: pickDeterministicPosition(cleanTopic),
-    consoleLog: `console.log("Exploring ${cleanTopic}...");`,
+    consoleLog: `console.log("Exploring ${englishTopic}...");`,
     emotion: "default",
     cleanTopic,
   };
 }
 
 function buildEnglishTitleHint(topic) {
-  const words = String(topic || "")
+  const raw = String(topic || "")
+    .replace(/[\r\n]+/g, " ")
     .replace(/\s+/g, " ")
-    .trim()
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 12);
-
-  if (words.length === 0) {
+    .trim();
+  if (!raw) {
     return DEFAULT_PANEL_MAIN_TEXT;
   }
 
-  return words.join(" ").toUpperCase();
+  const asciiTokens = normalizeAscii(raw).split(/\s+/).filter(Boolean);
+  const containsVietnamese = hasVietnameseDiacritics(raw) || looksVietnameseByKeywords(raw);
+
+  // Nếu đã là EN thì chỉ cần normalize nhẹ.
+  if (!containsVietnamese) {
+    const englishLike = compactUpperTitle(asciiTokens, 10, 84);
+    return englishLike || DEFAULT_PANEL_MAIN_TEXT;
+  }
+
+  // Nếu là VN, map theo từ khóa chính sang EN.
+  const mappedTokens = toAsciiLower(raw)
+    .split(/\s+/)
+    .map((token) => VI_TO_EN_TOKEN_MAP[token] || "")
+    .filter(Boolean);
+  const mapped = compactUpperTitle(mappedTokens, 8, 72);
+  if (mapped) {
+    return mapped;
+  }
+
+  const fallbackAscii = compactUpperTitle(asciiTokens, 8, 72);
+  return fallbackAscii || DEFAULT_PANEL_MAIN_TEXT;
 }
 
 function resolveImageInput(input) {
@@ -138,23 +218,17 @@ function resolveImageInput(input) {
 }
 
 function sanitizePanelMainText(value, fallback) {
-  const normalized = String(value || "")
-    .replace(/[\r\n]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const source = normalized || String(fallback || "").trim();
-  if (!source) {
-    return DEFAULT_PANEL_MAIN_TEXT;
+  const primary = buildEnglishTitleHint(value);
+  if (primary && primary !== DEFAULT_PANEL_MAIN_TEXT) {
+    return primary;
   }
 
-  return source
-    .toUpperCase()
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 14)
-    .join(" ")
-    .slice(0, 96);
+  const secondary = buildEnglishTitleHint(fallback);
+  if (secondary) {
+    return secondary;
+  }
+
+  return DEFAULT_PANEL_MAIN_TEXT;
 }
 
 function buildImagePrompt(topicOrPayload, emotion = "default") {
@@ -162,7 +236,7 @@ function buildImagePrompt(topicOrPayload, emotion = "default") {
   const topic = input.topic || "web development topic";
   const scene = getAntSceneInstructions(topic);
   const sceneEmotion = emotion === "default" ? scene.emotion : emotion;
-  const rawTopic = sanitizeTopic(topic) || "web development topic";
+  const rawTopic = buildEnglishTitleHint(topic) || "WEB DEVELOPMENT TOPIC";
   const hintTitle = buildEnglishTitleHint(topic);
   const panelTitle = sanitizePanelMainText(input.imageShortTitle, hintTitle);
   const robotAction = input.antAction || scene.antAction;
@@ -185,7 +259,7 @@ Foreground and branding:
 
 Floating holographic layer:
 - In front of the laptop, create one complex free-floating cyber holographic panel.
-- Panel main text must be clear uppercase Vietnamese: "${panelTitle}".
+- Panel main text must be clear uppercase ENGLISH only: "${panelTitle}".
 - Panel secondary text must be fixed and clear: "${FIXED_PANEL_SUBTEXT}".
 - Add subtle white-blue floating code snippets around robot.
 - Keep text legible and unobstructed.

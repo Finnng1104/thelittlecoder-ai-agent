@@ -8,6 +8,7 @@ const { Telegraf, Markup } = require("telegraf");
 const {
   askAI,
   DEEP_RESEARCH_PROMPT,
+  NEWS_ENGINE_PROMPT,
   REFINE_CONTENT_PROMPT,
   ROADMAP_GENERATOR_PROMPT,
   SERIES_POST_PROMPT,
@@ -17,7 +18,10 @@ const {
   generateImageAsset,
   downloadImageBuffer,
 } = require("./src/services/image.service");
-const { postToFacebook, deleteFacebookPost } = require("./src/services/facebook.service");
+const {
+  postToFacebook,
+  deleteFacebookPost,
+} = require("./src/services/facebook.service");
 const { formatForFacebook } = require("./src/utils/textFormatter");
 const {
   loadRoadmap,
@@ -58,7 +62,9 @@ function firstNonEmpty(...values) {
   return "";
 }
 
-const APP_ENV = String(process.env.APP_ENV || process.env.NODE_ENV || "development")
+const APP_ENV = String(
+  process.env.APP_ENV || process.env.NODE_ENV || "development",
+)
   .trim()
   .toLowerCase();
 const IS_PRODUCTION_ENV = APP_ENV === "production";
@@ -69,7 +75,7 @@ function resolveTelegramToken() {
       process.env.TELEGRAM_BOT_PROD_TOKEN,
       process.env.TELEGRAM_TOKEN_PROD,
       process.env.TELEGRAM_BOT_TOKEN,
-      process.env.TELEGRAM_TOKEN
+      process.env.TELEGRAM_TOKEN,
     );
   }
 
@@ -77,7 +83,7 @@ function resolveTelegramToken() {
     process.env.TELEGRAM_BOT_TEST_TOKEN,
     process.env.TELEGRAM_TOKEN_DEV,
     process.env.TELEGRAM_BOT_TOKEN,
-    process.env.TELEGRAM_TOKEN
+    process.env.TELEGRAM_TOKEN,
   );
 }
 
@@ -86,7 +92,7 @@ function resolveOwnerChatId() {
     return firstNonEmpty(
       process.env.MY_CHAT_ID_PROD,
       process.env.MY_CHAT_ID,
-      process.env.YOUR_TELEGRAM_CHAT_ID
+      process.env.YOUR_TELEGRAM_CHAT_ID,
     );
   }
 
@@ -94,7 +100,7 @@ function resolveOwnerChatId() {
     process.env.MY_CHAT_ID_TEST,
     process.env.MY_CHAT_ID_DEV,
     process.env.MY_CHAT_ID,
-    process.env.YOUR_TELEGRAM_CHAT_ID
+    process.env.YOUR_TELEGRAM_CHAT_ID,
   );
 }
 
@@ -113,7 +119,7 @@ let botLockPath = "";
 let httpServer = null;
 const ENABLE_IMAGE_GENERATION = parseBoolean(
   process.env.ENABLE_IMAGE_GENERATION,
-  false
+  false,
 );
 const HTTP_PORT = Number(process.env.PORT || 4000);
 
@@ -121,7 +127,7 @@ assertStorageConfiguration();
 
 if (!telegramToken) {
   throw new Error(
-    "Missing Telegram bot token. Configure TELEGRAM_BOT_TEST_TOKEN (dev) or TELEGRAM_BOT_PROD_TOKEN (prod)."
+    "Missing Telegram bot token. Configure TELEGRAM_BOT_TEST_TOKEN (dev) or TELEGRAM_BOT_PROD_TOKEN (prod).",
   );
 }
 
@@ -158,8 +164,12 @@ function releaseBotLock() {
 }
 
 function acquireBotLock() {
-  const defaultLockFile = IS_PRODUCTION_ENV ? ".bot.prod.lock" : ".bot.dev.lock";
-  const configuredPath = String(process.env.BOT_LOCK_FILE || defaultLockFile).trim();
+  const defaultLockFile = IS_PRODUCTION_ENV
+    ? ".bot.prod.lock"
+    : ".bot.dev.lock";
+  const configuredPath = String(
+    process.env.BOT_LOCK_FILE || defaultLockFile,
+  ).trim();
   const lockPath = path.isAbsolute(configuredPath)
     ? configuredPath
     : path.resolve(__dirname, configuredPath);
@@ -175,9 +185,9 @@ function acquireBotLock() {
           started_at: new Date().toISOString(),
         },
         null,
-        2
+        2,
       ),
-      "utf8"
+      "utf8",
     );
   };
 
@@ -196,13 +206,15 @@ function acquireBotLock() {
     const existingPid = Number(parsed?.pid || 0);
     if (processExists(existingPid)) {
       throw new Error(
-        `Another bot process is running (pid=${existingPid}). Stop old process or remove lock: ${lockPath}`
+        `Another bot process is running (pid=${existingPid}). Stop old process or remove lock: ${lockPath}`,
       );
     }
     fs.unlinkSync(lockPath);
     createLock();
   } catch (error) {
-    throw new Error(`Failed to acquire bot lock at ${lockPath}: ${error.message}`);
+    throw new Error(
+      `Failed to acquire bot lock at ${lockPath}: ${error.message}`,
+    );
   }
 }
 
@@ -213,7 +225,9 @@ const apiApp = express();
 apiApp.use(cors());
 apiApp.use(express.json({ limit: "2mb" }));
 
-console.log(`[boot] APP_ENV=${APP_ENV} (telegram mode: ${IS_PRODUCTION_ENV ? "production" : "development"})`);
+console.log(
+  `[boot] APP_ENV=${APP_ENV} (telegram mode: ${IS_PRODUCTION_ENV ? "production" : "development"})`,
+);
 
 function ownerChatId() {
   return resolveOwnerChatId();
@@ -269,8 +283,12 @@ function buildDraftKeyboardWithId(draftId) {
     return Markup.inlineKeyboard(rows);
   }
 
-  const rows = [[Markup.button.callback("Duyệt & Đăng bài", `confirm_post:${id}`)]];
-  rows.push([Markup.button.callback("Chỉnh sửa nội dung", `edit_content:${id}`)]);
+  const rows = [
+    [Markup.button.callback("Duyệt & Đăng bài", `confirm_post:${id}`)],
+  ];
+  rows.push([
+    Markup.button.callback("Chỉnh sửa nội dung", `edit_content:${id}`),
+  ]);
   if (ENABLE_IMAGE_GENERATION) {
     rows.push([Markup.button.callback("Đổi ảnh khác", `regen_image:${id}`)]);
   }
@@ -279,16 +297,21 @@ function buildDraftKeyboardWithId(draftId) {
 }
 
 function createDraftId(prefix = "draft") {
-  const safePrefix = String(prefix || "draft")
-    .replace(/[^\w-]/g, "")
-    .slice(0, 12) || "draft";
+  const safePrefix =
+    String(prefix || "draft")
+      .replace(/[^\w-]/g, "")
+      .slice(0, 12) || "draft";
   const ts = Date.now().toString(36);
   const rnd = Math.random().toString(36).slice(2, 8);
   return `${safePrefix}_${ts}_${rnd}`;
 }
 
 async function storeDraft(chatId, payload, options = {}) {
-  const id = String(options.draftId || payload?.draftId || createDraftId(payload?.source || "draft"));
+  const id = String(
+    options.draftId ||
+      payload?.draftId ||
+      createDraftId(payload?.source || "draft"),
+  );
   const record = {
     ...payload,
     draftId: id,
@@ -382,7 +405,10 @@ function rememberPublishedPost(chatId, postId) {
   }
 
   const current = publishedPostStore.get(chatId) || { ids: [] };
-  const ids = [id, ...(current.ids || []).filter((item) => item !== id)].slice(0, 20);
+  const ids = [id, ...(current.ids || []).filter((item) => item !== id)].slice(
+    0,
+    20,
+  );
   publishedPostStore.set(chatId, {
     ids,
     lastPostId: ids[0],
@@ -445,12 +471,16 @@ function extractRewriteInput(text) {
     return null;
   }
 
-  const commandMatch = normalizedText.match(/^\/rewrite(?:@\w+)?(?:\s+([\s\S]+))?$/i);
+  const commandMatch = normalizedText.match(
+    /^\/rewrite(?:@\w+)?(?:\s+([\s\S]+))?$/i,
+  );
   if (commandMatch) {
     return String(commandMatch[1] || "").trim();
   }
 
-  const prefixMatch = normalizedText.match(/^(?:viet lai|viết lại|content)\s*:\s*([\s\S]+)$/i);
+  const prefixMatch = normalizedText.match(
+    /^(?:viet lai|viết lại|content)\s*:\s*([\s\S]+)$/i,
+  );
   if (prefixMatch) {
     return String(prefixMatch[1] || "").trim();
   }
@@ -487,6 +517,31 @@ function buildTopicFromRawContent(rawContent) {
   return cleaned.slice(0, 120);
 }
 
+function inferManualPostIntent(topic) {
+  const normalized = toAsciiLower(topic);
+  if (!normalized) {
+    return "insight";
+  }
+
+  if (
+    /\b(tin tuc|tin moi|news|breaking|hom nay|today|cap nhat|update|xu huong|trend)\b/.test(
+      normalized,
+    )
+  ) {
+    return "news";
+  }
+
+  if (
+    /\b(tutorial|huong dan|cach lam|how to|step by step|setup|cai dat|hello world|vi du code|code along)\b/.test(
+      normalized,
+    )
+  ) {
+    return "tutorial";
+  }
+
+  return "insight";
+}
+
 function toCaption(postText) {
   const fullCaption = `BẢN THẢO CHẤT LƯỢNG CAO:\n\n${postText}`;
   if (fullCaption.length <= TELEGRAM_CAPTION_MAX) {
@@ -494,7 +549,8 @@ function toCaption(postText) {
   }
 
   const suffix = "\n\n... (caption đã rút gọn)";
-  const trimmed = fullCaption.slice(0, TELEGRAM_CAPTION_MAX - suffix.length) + suffix;
+  const trimmed =
+    fullCaption.slice(0, TELEGRAM_CAPTION_MAX - suffix.length) + suffix;
   return { caption: trimmed, truncated: true };
 }
 
@@ -551,8 +607,15 @@ function buildFallbackShortTitle(topic) {
   return words.join(" ");
 }
 
-function buildSeriesImageShortTitle(day, topic, aiShortTitle = "", roadmapImageHint = "") {
-  const normalizedDay = Number.isFinite(Number(day)) ? Math.max(1, Math.floor(Number(day))) : 1;
+function buildSeriesImageShortTitle(
+  day,
+  topic,
+  aiShortTitle = "",
+  roadmapImageHint = "",
+) {
+  const normalizedDay = Number.isFinite(Number(day))
+    ? Math.max(1, Math.floor(Number(day)))
+    : 1;
   const hintRaw = String(roadmapImageHint || "").trim();
   const raw = String(aiShortTitle || "")
     .replace(/^DAY\s*\d+\s*[:\-]?\s*/i, "")
@@ -570,7 +633,9 @@ function buildSeriesImageShortTitle(day, topic, aiShortTitle = "", roadmapImageH
 }
 
 function ensureSeriesHeading(postText, day, topic) {
-  const normalizedDay = Number.isFinite(Number(day)) ? Math.max(1, Math.floor(Number(day))) : 1;
+  const normalizedDay = Number.isFinite(Number(day))
+    ? Math.max(1, Math.floor(Number(day)))
+    : 1;
   const heading = `📘 DAY ${normalizedDay}: ${String(topic || "").trim()}`;
   const normalizedText = String(postText || "").trim();
   if (!normalizedText) {
@@ -732,9 +797,13 @@ function formatRoadmapItemLabel(item) {
 
 function formatRoadmapList(items, options = {}) {
   const rows = Array.isArray(items) ? items : [];
-  const statusFilter = String(options.status || "").trim().toLowerCase();
+  const statusFilter = String(options.status || "")
+    .trim()
+    .toLowerCase();
   const filtered = statusFilter
-    ? rows.filter((item) => String(item?.status || "").toLowerCase() === statusFilter)
+    ? rows.filter(
+        (item) => String(item?.status || "").toLowerCase() === statusFilter,
+      )
     : rows;
 
   if (filtered.length === 0) {
@@ -763,14 +832,16 @@ function formatRoadmapList(items, options = {}) {
         `type: ${resolveRoadmapSeriesType(item)}\n` +
         `id: ${item.id}\n` +
         `topic: ${item.topic}\n` +
-        `${item.image_hint ? `image_hint: ${item.image_hint}` : ""}`
+        `${item.image_hint ? `image_hint: ${item.image_hint}` : ""}`,
     );
 
   return lines.join("\n\n");
 }
 
 function parseBoolean(value, defaultValue = false) {
-  const raw = String(value ?? "").trim().toLowerCase();
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (!raw) {
     return defaultValue;
   }
@@ -802,10 +873,14 @@ function normalizeRoadmapSeriesType(value) {
   if (["study", "learn", "learning", "hoc", "study_series"].includes(raw)) {
     return "study";
   }
-  if (["talk", "story", "sharing", "chia-se", "tamsu", "tam-su"].includes(raw)) {
+  if (
+    ["talk", "story", "sharing", "chia-se", "tamsu", "tam-su"].includes(raw)
+  ) {
     return "talk";
   }
-  if (["summary", "review", "weekly-summary", "tong-ket", "tongket"].includes(raw)) {
+  if (
+    ["summary", "review", "weekly-summary", "tong-ket", "tongket"].includes(raw)
+  ) {
     return "summary";
   }
 
@@ -822,7 +897,11 @@ function inferRoadmapSeriesTypeFromTopic(topic) {
     return "summary";
   }
 
-  if (/(tam su|chia se|hanh trinh|cau chuyen|cam nhan|kinh nghiem|lessons learned)/.test(normalized)) {
+  if (
+    /(tam su|chia se|hanh trinh|cau chuyen|cam nhan|kinh nghiem|lessons learned)/.test(
+      normalized,
+    )
+  ) {
     return "talk";
   }
 
@@ -882,13 +961,22 @@ function getRoadmapScheduleRuleForDate(date, timezone) {
   };
 }
 
-function findNextRoadmapItemBySchedule(items, statuses = ["pending"], options = {}) {
+function findNextRoadmapItemBySchedule(
+  items,
+  statuses = ["pending"],
+  options = {},
+) {
   const rows = Array.isArray(items) ? items : [];
-  const allowedStatus = new Set((Array.isArray(statuses) ? statuses : ["pending"]).map(String));
-  const timezone = String(options.timezone || process.env.ROADMAP_TIMEZONE || "Asia/Ho_Chi_Minh");
+  const allowedStatus = new Set(
+    (Array.isArray(statuses) ? statuses : ["pending"]).map(String),
+  );
+  const timezone = String(
+    options.timezone || process.env.ROADMAP_TIMEZONE || "Asia/Ho_Chi_Minh",
+  );
   const allowCrossTypeFallback = parseBoolean(
-    options.allowCrossTypeFallback ?? process.env.ROADMAP_ALLOW_CROSS_TYPE_FALLBACK,
-    false
+    options.allowCrossTypeFallback ??
+      process.env.ROADMAP_ALLOW_CROSS_TYPE_FALLBACK,
+    false,
   );
 
   const rule = getRoadmapScheduleRuleForDate(new Date(), timezone);
@@ -901,8 +989,10 @@ function findNextRoadmapItemBySchedule(items, statuses = ["pending"], options = 
       const typeB = resolveRoadmapSeriesType(b);
       const dayA = Number(a?.day || Number.MAX_SAFE_INTEGER);
       const dayB = Number(b?.day || Number.MAX_SAFE_INTEGER);
-      const createdA = Date.parse(String(a?.created_at || a?.updated_at || "")) || 0;
-      const createdB = Date.parse(String(b?.created_at || b?.updated_at || "")) || 0;
+      const createdA =
+        Date.parse(String(a?.created_at || a?.updated_at || "")) || 0;
+      const createdB =
+        Date.parse(String(b?.created_at || b?.updated_at || "")) || 0;
 
       // Study -> ưu tiên theo day.
       if (typeA === "study" || typeB === "study") {
@@ -918,7 +1008,9 @@ function findNextRoadmapItemBySchedule(items, statuses = ["pending"], options = 
       return String(a?.id || "").localeCompare(String(b?.id || ""));
     });
 
-  const matched = pendingRows.find((item) => preferredTypeSet.has(resolveRoadmapSeriesType(item)));
+  const matched = pendingRows.find((item) =>
+    preferredTypeSet.has(resolveRoadmapSeriesType(item)),
+  );
   if (matched) {
     return { item: matched, rule, usedFallback: false };
   }
@@ -932,7 +1024,10 @@ function findNextRoadmapItemBySchedule(items, statuses = ["pending"], options = 
 
 function recoverInterruptedProcessingItems(
   items,
-  staleMinutes = parsePositiveInt(process.env.ROADMAP_PROCESSING_STALE_MINUTES, 20)
+  staleMinutes = parsePositiveInt(
+    process.env.ROADMAP_PROCESSING_STALE_MINUTES,
+    20,
+  ),
 ) {
   const rows = Array.isArray(items) ? items : [];
   let recoveredCount = 0;
@@ -946,10 +1041,11 @@ function recoverInterruptedProcessingItems(
     }
 
     const startedAtRaw = String(
-      item?.processing_started_at || item?.updated_at || item?.created_at || ""
+      item?.processing_started_at || item?.updated_at || item?.created_at || "",
     ).trim();
     const startedAtMs = Date.parse(startedAtRaw);
-    const isStale = !Number.isFinite(startedAtMs) || now - startedAtMs >= staleMs;
+    const isStale =
+      !Number.isFinite(startedAtMs) || now - startedAtMs >= staleMs;
     if (!isStale) {
       return item;
     }
@@ -997,7 +1093,8 @@ async function sendDraftPreview(ctx, imageAsset, postText, draftId = "") {
 
   const { caption, truncated } = toCaption(postText);
   const imageUrl = imageAsset?.url || imageAsset?.imageUrl || "";
-  const hasBuffer = imageAsset?.type === "buffer" && Buffer.isBuffer(imageAsset.buffer);
+  const hasBuffer =
+    imageAsset?.type === "buffer" && Buffer.isBuffer(imageAsset.buffer);
 
   const sendFromUrlWithFallback = async (url) => {
     if (!url) {
@@ -1011,10 +1108,16 @@ async function sendDraftPreview(ctx, imageAsset, postText, draftId = "") {
       });
       return;
     } catch (imgUrlError) {
-      console.log("[bot] URL image failed, try upload buffer:", imgUrlError.message);
+      console.log(
+        "[bot] URL image failed, try upload buffer:",
+        imgUrlError.message,
+      );
     }
 
-    const { buffer: imageBuffer, mimeType } = await downloadImageBuffer(url, true);
+    const { buffer: imageBuffer, mimeType } = await downloadImageBuffer(
+      url,
+      true,
+    );
     if (!isTelegramPhotoMime(mimeType)) {
       throw new Error(`Unsupported image mime for Telegram photo: ${mimeType}`);
     }
@@ -1023,7 +1126,7 @@ async function sendDraftPreview(ctx, imageAsset, postText, draftId = "") {
       {
         caption,
         ...keyboard,
-      }
+      },
     );
   };
 
@@ -1034,7 +1137,7 @@ async function sendDraftPreview(ctx, imageAsset, postText, draftId = "") {
         {
           caption,
           ...keyboard,
-        }
+        },
       );
     } else if (imageUrl) {
       await sendFromUrlWithFallback(imageUrl);
@@ -1042,11 +1145,14 @@ async function sendDraftPreview(ctx, imageAsset, postText, draftId = "") {
       throw new Error("No image data from generator");
     }
   } catch (imageError) {
-    console.log("[bot] Preview image failed, fallback text:", imageError.message);
+    console.log(
+      "[bot] Preview image failed, fallback text:",
+      imageError.message,
+    );
     await safeReplyLongText(
       ctx,
       `BẢN THẢO (lỗi hiển thị ảnh):\n\n${imageUrl ? `Link ảnh: ${imageUrl}\n\n` : ""}${postText}`,
-      keyboard
+      keyboard,
     );
     return;
   }
@@ -1062,7 +1168,7 @@ async function updateStatus(ctx, statusMessage, text) {
       ctx.chat.id,
       statusMessage.message_id,
       undefined,
-      text
+      text,
     );
   } catch (error) {
     console.log("[bot] Could not edit status message:", error.message);
@@ -1081,16 +1187,22 @@ async function runDeletePostFlow(ctx, inputPostId = "") {
 
   if (!postId) {
     await ctx.reply(
-      "Chưa có ID để xóa. Dùng: /delete <post_id> hoặc đăng bài mới rồi /delete."
+      "Chưa có ID để xóa. Dùng: /delete <post_id> hoặc đăng bài mới rồi /delete.",
     );
     return;
   }
 
-  const statusMsg = await ctx.reply(`Đang yêu cầu Facebook gỡ bài: ${postId}...`);
+  const statusMsg = await ctx.reply(
+    `Đang yêu cầu Facebook gỡ bài: ${postId}...`,
+  );
   try {
     await deleteFacebookPost(postId);
     forgetPublishedPost(chatId, postId);
-    await updateStatus(ctx, statusMsg, "Đã xóa bài viết thành công khỏi Fanpage.");
+    await updateStatus(
+      ctx,
+      statusMsg,
+      "Đã xóa bài viết thành công khỏi Fanpage.",
+    );
   } catch (error) {
     await updateStatus(ctx, statusMsg, `Xóa thất bại: ${error.message}`);
   }
@@ -1109,26 +1221,34 @@ async function runDraftEditFeedbackFlow(ctx, feedbackText) {
 
   const feedback = String(feedbackText || "").trim();
   if (!feedback) {
-    await ctx.reply("Feedback đang trống. Gửi lại nội dung bạn muốn chỉnh sửa nhé.");
+    await ctx.reply(
+      "Feedback đang trống. Gửi lại nội dung bạn muốn chỉnh sửa nhé.",
+    );
     return true;
   }
 
   const draft = await resolveDraftByAction(chatId, pendingRequest.draftId);
   if (!draft) {
     clearPendingDraftEditRequest(chatId);
-    await ctx.reply("Không tìm thấy bản nháp để chỉnh sửa. Hãy tạo lại bản nháp mới.");
+    await ctx.reply(
+      "Không tìm thấy bản nháp để chỉnh sửa. Hãy tạo lại bản nháp mới.",
+    );
     return true;
   }
 
-  const statusMsg = await ctx.reply("[Edit] Đang cập nhật bản thảo theo feedback của bạn...");
+  const statusMsg = await ctx.reply(
+    "[Edit] Đang cập nhật bản thảo theo feedback của bạn...",
+  );
 
   try {
     const isSeries = Number.isFinite(Number(draft.roadmapDay));
-    const seriesDay = isSeries ? Math.max(1, Math.floor(Number(draft.roadmapDay))) : null;
+    const seriesDay = isSeries
+      ? Math.max(1, Math.floor(Number(draft.roadmapDay)))
+      : null;
     const roadmapItem = draft.roadmapItemId
       ? findRoadmapItemByTarget(
           await loadRoadmap(),
-          String(draft.roadmapItemId)
+          String(draft.roadmapItemId),
         )
       : null;
     const seriesHint = String(roadmapItem?.image_hint || "").trim();
@@ -1146,12 +1266,16 @@ async function runDraftEditFeedbackFlow(ctx, feedbackText) {
         process.env.AI_MODEL ||
         process.env.OPENROUTER_DEEP_MODEL ||
         process.env.OPENROUTER_MODEL,
+      expectJson: true,
       temperature: 0.3,
       timeout: 300000,
       throwOnError: true,
     });
 
-    const structured = parseStructuredAiOutput(structuredRaw, draft.topic || "draft");
+    const structured = parseStructuredAiOutput(
+      structuredRaw,
+      draft.topic || "draft",
+    );
     let finalPost = formatForFacebook(structured.post_content);
     if (isSeries) {
       finalPost = ensureSeriesHeading(finalPost, seriesDay, draft.topic || "");
@@ -1165,7 +1289,7 @@ async function runDraftEditFeedbackFlow(ctx, feedbackText) {
             seriesDay,
             draft.topic || draft.imageMeta?.topic || "",
             structured.image_short_title,
-            seriesHint
+            seriesHint,
           )
         : structured.image_short_title || draft.imageMeta?.image_short_title,
       ant_action: structured.ant_action || draft.imageMeta?.ant_action,
@@ -1180,68 +1304,108 @@ async function runDraftEditFeedbackFlow(ctx, feedbackText) {
         imageMeta: updatedImageMeta,
         lastEditFeedback: feedback,
       },
-      { draftId: draft.draftId }
+      { draftId: draft.draftId },
     );
 
     clearPendingDraftEditRequest(chatId);
-    await sendDraftPreview(ctx, updatedDraft.imageAsset, updatedDraft.postText, updatedDraft.draftId);
-    await updateStatus(ctx, statusMsg, "[Edit] Đã cập nhật bản thảo theo feedback. Bạn duyệt lại giúp mình.");
+    await sendDraftPreview(
+      ctx,
+      updatedDraft.imageAsset,
+      updatedDraft.postText,
+      updatedDraft.draftId,
+    );
+    await updateStatus(
+      ctx,
+      statusMsg,
+      "[Edit] Đã cập nhật bản thảo theo feedback. Bạn duyệt lại giúp mình.",
+    );
     return true;
   } catch (error) {
-    await updateStatus(ctx, statusMsg, `[Edit] Chỉnh sửa thất bại: ${error.message}`);
+    await updateStatus(
+      ctx,
+      statusMsg,
+      `[Edit] Chỉnh sửa thất bại: ${error.message}`,
+    );
     await ctx.reply("Bạn có thể gửi feedback khác để mình thử chỉnh lại.");
     return true;
   }
 }
 
 async function buildDraftFromTopic(topic, options = {}) {
-  const onStep = typeof options.onStep === "function" ? options.onStep : async () => {};
-  const seriesInfo = options.seriesInfo && typeof options.seriesInfo === "object" ? options.seriesInfo : null;
+  const onStep =
+    typeof options.onStep === "function" ? options.onStep : async () => {};
+  const seriesInfo =
+    options.seriesInfo && typeof options.seriesInfo === "object"
+      ? options.seriesInfo
+      : null;
   const isSeries = Number.isFinite(Number(seriesInfo?.day));
-  const seriesDay = isSeries ? Math.max(1, Math.floor(Number(seriesInfo.day))) : null;
+  const seriesDay = isSeries
+    ? Math.max(1, Math.floor(Number(seriesInfo.day)))
+    : null;
   const seriesTotal = Number.isFinite(Number(seriesInfo?.total))
     ? Math.max(1, Math.floor(Number(seriesInfo.total)))
     : null;
-  const seriesImageHint = isSeries ? String(seriesInfo?.image_hint || "").trim() : "";
+  const seriesImageHint = isSeries
+    ? String(seriesInfo?.image_hint || "").trim()
+    : "";
+  const postIntent = isSeries ? "series" : inferManualPostIntent(topic);
+  const currentDate = new Date().toLocaleDateString("vi-VN", {
+    timeZone: process.env.ROADMAP_TIMEZONE || "Asia/Ho_Chi_Minh",
+  });
 
-  await onStep(1, `[1/4] Đang research thông tin mới nhất về: ${topic}...`);
   const research = await researchToday(topic, {
     search_depth: "advanced",
-    max_results: isSeries ? 6 : 10,
+    max_results: isSeries ? 6 : postIntent === "news" ? 5 : 10,
+    max_total_results: isSeries ? 10 : postIntent === "news" ? 10 : 16,
     bilingual: true,
+    topic: postIntent === "news" ? "news" : undefined,
+    days: postIntent === "news" ? 1 : undefined,
   });
 
   await onStep(
     2,
-    `[2/4] Đã research ${research.totalResults} nguồn (EN + VI). Đang viết bài và tạo JSON theo hiến pháp content...`
+    `[2/4] Đã research ${research.totalResults} nguồn (EN + VI). Đang viết bài và tạo JSON theo hiến pháp content...`,
   );
 
   const structuredRaw = await askAI(
-    (isSeries
+    isSeries
       ? `Đây là bài thuộc series roadmap.\n` +
-        `Day hiện tại: ${seriesDay}\n` +
-        `${seriesTotal ? `Tổng số day trong series: ${seriesTotal}\n` : ""}` +
-        `Chủ đề Day ${seriesDay}: ${topic}\n` +
-        `${seriesImageHint ? `image_hint từ roadmap: ${seriesImageHint}\n` : ""}` +
-        `Dữ liệu research:\n${research.infoText}\n\n` +
-        `Từ khóa research EN: ${research.queries?.en || research.query}\n` +
-        `Từ khóa research VI: ${research.queries?.vi || research.originalQuery}\n\n` +
-        "Hãy viết ngắn gọn, dễ hiểu, đúng format series và trả về JSON schema."
+          `Day hiện tại: ${seriesDay}\n` +
+          `${seriesTotal ? `Tổng số day trong series: ${seriesTotal}\n` : ""}` +
+          `Chủ đề Day ${seriesDay}: ${topic}\n` +
+          `${seriesImageHint ? `image_hint từ roadmap: ${seriesImageHint}\n` : ""}` +
+          `Dữ liệu research:\n${research.infoText}\n\n` +
+          `Từ khóa research EN: ${research.queries?.en || research.query}\n` +
+          `Từ khóa research VI: ${research.queries?.vi || research.originalQuery}\n\n` +
+          "Hãy viết ngắn gọn, dễ hiểu, đúng format series và trả về JSON schema."
       : `Dữ liệu research gốc:\n${research.infoText}\n\n` +
-        `Chủ đề gốc: ${topic}\n` +
-        `Từ khóa research EN: ${research.queries?.en || research.query}\n` +
-        `Từ khóa research VI: ${research.queries?.vi || research.originalQuery}\n\n` +
-        "Hãy tạo output JSON đúng schema yêu cầu. Không trả về markdown, không lời giải thích."),
+          `Chủ đề gốc: ${topic}\n` +
+          `Ngày hiện tại: ${currentDate}\n` +
+          `Từ khóa research EN: ${research.queries?.en || research.query}\n` +
+          `Từ khóa research VI: ${research.queries?.vi || research.originalQuery}\n\n` +
+          (postIntent === "news"
+            ? "Đây là bài BẢN TIN CÔNG NGHỆ.\n" +
+              "Tập trung vào: cái gì mới, ảnh hưởng gì tới dev, và hành động tiếp theo.\n" +
+              "KHÔNG kể chuyện quá khứ dài dòng, KHÔNG than thở.\n"
+            : postIntent === "tutorial"
+              ? "Đây là bài hướng dẫn kỹ thuật. Viết rõ ràng, thực chiến, có checklist ngắn nếu cần.\n"
+              : "Đây là bài chia sẻ góc nhìn/thực chiến, không viết checklist tutorial dài.\n") +
+          "Hãy tạo output JSON đúng schema yêu cầu. Không trả về markdown, không lời giải thích.",
     {
-      systemPrompt: isSeries ? SERIES_POST_PROMPT : DEEP_RESEARCH_PROMPT,
+      systemPrompt: isSeries
+        ? SERIES_POST_PROMPT
+        : postIntent === "news"
+          ? NEWS_ENGINE_PROMPT
+          : DEEP_RESEARCH_PROMPT,
       model:
         process.env.AI_MODEL ||
         process.env.OPENROUTER_DEEP_MODEL ||
         process.env.OPENROUTER_MODEL,
+      expectJson: true,
       temperature: isSeries ? 0.25 : 0.35,
       timeout: 300000,
       throwOnError: true,
-    }
+    },
   );
 
   await onStep(3, "[3/4] Đang parse JSON và dọn đẹp nội dung Facebook...");
@@ -1257,7 +1421,7 @@ async function buildDraftFromTopic(topic, options = {}) {
           seriesDay,
           topic,
           structured.image_short_title,
-          seriesImageHint
+          seriesImageHint,
         )
       : structured.image_short_title,
     ant_action: structured.ant_action,
@@ -1266,10 +1430,16 @@ async function buildDraftFromTopic(topic, options = {}) {
 
   let imageAsset = null;
   if (ENABLE_IMAGE_GENERATION) {
-    await onStep(4, "[4/4] Gemini đang tạo banner theo bố cục The Little Coder...");
+    await onStep(
+      4,
+      "[4/4] Gemini đang tạo banner theo bố cục The Little Coder...",
+    );
     imageAsset = await generateImageAsset(imageMeta, "default");
   } else {
-    await onStep(4, "[4/4] Đang tắt tạm thời tính năng tạo ảnh, gửi bản nháp text để duyệt...");
+    await onStep(
+      4,
+      "[4/4] Đang tắt tạm thời tính năng tạo ảnh, gửi bản nháp text để duyệt...",
+    );
   }
 
   return {
@@ -1291,12 +1461,14 @@ async function runRewriteFlow(ctx, rawContent) {
   const userRaw = String(rawContent || "").trim();
   if (!userRaw) {
     await ctx.reply(
-      "Bạn hãy gửi: /rewrite <nội dung thô>\nHoặc: Viết lại: <nội dung thô>"
+      "Bạn hãy gửi: /rewrite <nội dung thô>\nHoặc: Viết lại: <nội dung thô>",
     );
     return;
   }
 
-  const statusMsg = await ctx.reply("[1/3] Đang refactor nội dung theo phong cách The Little Coder...");
+  const statusMsg = await ctx.reply(
+    "[1/3] Đang refactor nội dung theo phong cách The Little Coder...",
+  );
 
   try {
     const structuredRaw = await askAI(
@@ -1308,19 +1480,23 @@ async function runRewriteFlow(ctx, rawContent) {
           process.env.AI_MODEL ||
           process.env.OPENROUTER_DEEP_MODEL ||
           process.env.OPENROUTER_MODEL,
+        expectJson: true,
         temperature: 0.4,
         timeout: 300000,
         throwOnError: true,
-      }
+      },
     );
 
     await updateStatus(
       ctx,
       statusMsg,
-      "[2/3] Đang parse JSON và dọn đẹp nội dung để tạo bản thảo..."
+      "[2/3] Đang parse JSON và dọn đẹp nội dung để tạo bản thảo...",
     );
 
-    const structured = parseStructuredAiOutput(structuredRaw, buildTopicFromRawContent(userRaw));
+    const structured = parseStructuredAiOutput(
+      structuredRaw,
+      buildTopicFromRawContent(userRaw),
+    );
     const finalPost = formatForFacebook(structured.post_content);
     const imageMeta = {
       topic: buildTopicFromRawContent(userRaw),
@@ -1334,7 +1510,7 @@ async function runRewriteFlow(ctx, rawContent) {
       statusMsg,
       ENABLE_IMAGE_GENERATION
         ? "[3/3] Đang tạo banner và gửi bản thảo để duyệt..."
-        : "[3/3] Đang gửi bản thảo text để duyệt (tạm tắt tạo ảnh)..."
+        : "[3/3] Đang gửi bản thảo text để duyệt (tạm tắt tạo ảnh)...",
     );
 
     const imageAsset = ENABLE_IMAGE_GENERATION
@@ -1354,7 +1530,7 @@ async function runRewriteFlow(ctx, rawContent) {
     await updateStatus(
       ctx,
       statusMsg,
-      "Đã refactor xong. Bản thảo sẵn sàng, bấm Duyệt & Đăng bài nếu ok."
+      "Đã refactor xong. Bản thảo sẵn sàng, bấm Duyệt & Đăng bài nếu ok.",
     );
   } catch (error) {
     console.error("[bot] Rewrite workflow error:", error.message);
@@ -1368,7 +1544,8 @@ function createTelegramCtxProxy(chatId) {
     chat: { id: Number(chatId) },
     telegram: bot.telegram,
     reply: (text, extra) => bot.telegram.sendMessage(chatId, text, extra),
-    replyWithPhoto: (photo, extra) => bot.telegram.sendPhoto(chatId, photo, extra),
+    replyWithPhoto: (photo, extra) =>
+      bot.telegram.sendPhoto(chatId, photo, extra),
   };
 }
 
@@ -1389,13 +1566,19 @@ async function runRoadmapCreateFlow(ctx, sourceTopic, options = {}) {
   }
 
   const topic = String(sourceTopic || "").trim();
-  const defaultSeriesType = normalizeRoadmapSeriesType(options.defaultSeriesType || "");
+  const defaultSeriesType = normalizeRoadmapSeriesType(
+    options.defaultSeriesType || "",
+  );
   if (!topic) {
-    await ctx.reply("Dùng: /roadmap <chủ đề lớn>. Ví dụ: /roadmap ReactJS từ A-Z");
+    await ctx.reply(
+      "Dùng: /roadmap <chủ đề lớn>. Ví dụ: /roadmap ReactJS từ A-Z",
+    );
     return;
   }
 
-  const statusMsg = await ctx.reply(`[Roadmap] Đang tạo lộ trình cho: ${topic}...`);
+  const statusMsg = await ctx.reply(
+    `[Roadmap] Đang tạo lộ trình cho: ${topic}...`,
+  );
   try {
     const rawPlan = await askAI(
       `Chủ đề tổng: ${topic}\n\n` +
@@ -1410,10 +1593,11 @@ async function runRoadmapCreateFlow(ctx, sourceTopic, options = {}) {
           process.env.AI_MODEL ||
           process.env.OPENROUTER_DEEP_MODEL ||
           process.env.OPENROUTER_MODEL,
+        expectJson: true,
         temperature: 0.2,
         timeout: 180000,
         throwOnError: true,
-      }
+      },
     );
 
     const roadmapItemsRaw = parseRoadmapOutput(rawPlan, topic);
@@ -1431,11 +1615,11 @@ async function runRoadmapCreateFlow(ctx, sourceTopic, options = {}) {
     await updateStatus(
       ctx,
       statusMsg,
-      `[Roadmap] Đã tạo xong ${stats.total} bài (CHƯA LƯU).`
+      `[Roadmap] Đã tạo xong ${stats.total} bài (CHƯA LƯU).`,
     );
     await safeReplyLongText(
       ctx,
-      `Danh sách đề xuất (${stats.total} bài):\n${formatRoadmapSummary(roadmapItems)}`
+      `Danh sách đề xuất (${stats.total} bài):\n${formatRoadmapSummary(roadmapItems)}`,
     );
     await ctx.reply(
       `Đề xuất này đang chờ bạn duyệt.\n` +
@@ -1444,11 +1628,15 @@ async function runRoadmapCreateFlow(ctx, sourceTopic, options = {}) {
         `- Bỏ đề xuất: /roadmap_discard\n` +
         `- Duyệt tất cả để chạy lịch: /roadmap_approve_all\n` +
         `- Duyệt từng bài: /roadmap_approve <day|id>\n` +
-        `- Đổi type bài: /roadmap_type <day|id> <study|talk|summary>`
+        `- Đổi type bài: /roadmap_type <day|id> <study|talk|summary>`,
     );
   } catch (error) {
     console.error("[bot] Roadmap create error:", error.message);
-    await updateStatus(ctx, statusMsg, `[Roadmap] Tạo roadmap thất bại: ${error.message}`);
+    await updateStatus(
+      ctx,
+      statusMsg,
+      `[Roadmap] Tạo roadmap thất bại: ${error.message}`,
+    );
   }
 }
 
@@ -1460,11 +1648,15 @@ async function runRoadmapSaveFlow(ctx, rawArg = "") {
 
   const proposal = roadmapProposalStore.get(chatId);
   if (!proposal?.items?.length) {
-    await ctx.reply("Chưa có đề xuất roadmap để lưu. Dùng /roadmap <chủ đề lớn> trước.");
+    await ctx.reply(
+      "Chưa có đề xuất roadmap để lưu. Dùng /roadmap <chủ đề lớn> trước.",
+    );
     return;
   }
 
-  const saveMode = String(rawArg || "").trim().toLowerCase();
+  const saveMode = String(rawArg || "")
+    .trim()
+    .toLowerCase();
   const replaceMode = ["replace", "overwrite", "reset"].includes(saveMode);
 
   let nextItems = proposal.items;
@@ -1479,26 +1671,24 @@ async function runRoadmapSaveFlow(ctx, rawArg = "") {
     }, 0);
 
     let studyOffset = 0;
-    const appended = proposal.items
-      .slice()
-      .map((item) => {
-        const itemType = resolveRoadmapSeriesType(item);
-        const nextItem = {
-          ...item,
-          series_type: itemType,
-          appended_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
+    const appended = proposal.items.slice().map((item) => {
+      const itemType = resolveRoadmapSeriesType(item);
+      const nextItem = {
+        ...item,
+        series_type: itemType,
+        appended_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
 
-        if (itemType === "study") {
-          studyOffset += 1;
-          nextItem.day = maxCurrentStudyDay + studyOffset;
-        } else {
-          delete nextItem.day;
-        }
+      if (itemType === "study") {
+        studyOffset += 1;
+        nextItem.day = maxCurrentStudyDay + studyOffset;
+      } else {
+        delete nextItem.day;
+      }
 
-        return nextItem;
-      });
+      return nextItem;
+    });
 
     nextItems = [...current, ...appended];
   }
@@ -1509,7 +1699,7 @@ async function runRoadmapSaveFlow(ctx, rawArg = "") {
   await ctx.reply(
     `[Roadmap] Đã ${replaceMode ? "ghi đè" : "append"} ${proposal.items.length} bài vào ${resolveRoadmapPath()}.\n` +
       `Hiện tại: total=${stats.total}, draft=${stats.draft}, pending=${stats.pending}, drafted=${stats.drafted}, posted=${stats.posted}.\n` +
-      `Mặc định đang ở trạng thái DRAFT, bạn duyệt bằng /roadmap_approve hoặc /roadmap_approve_all.`
+      `Mặc định đang ở trạng thái DRAFT, bạn duyệt bằng /roadmap_approve hoặc /roadmap_approve_all.`,
   );
 }
 
@@ -1567,7 +1757,9 @@ async function runRoadmapApproveFlow(ctx, target) {
     approved_at: new Date().toISOString(),
   });
   await saveRoadmap(updated);
-  await ctx.reply(`Đã duyệt ${formatRoadmapItemLabel(found)} (${found.topic}) -> PENDING.`);
+  await ctx.reply(
+    `Đã duyệt ${formatRoadmapItemLabel(found)} (${found.topic}) -> PENDING.`,
+  );
 }
 
 async function runRoadmapApproveAllFlow(ctx) {
@@ -1579,7 +1771,7 @@ async function runRoadmapApproveAllFlow(ctx) {
   const roadmap = await loadRoadmap();
   if (roadmap.length === 0) {
     await ctx.reply(
-      "Roadmap hiện đang rỗng (0 bài). Dùng /roadmap <chủ đề lớn> rồi /roadmap_save trước."
+      "Roadmap hiện đang rỗng (0 bài). Dùng /roadmap <chủ đề lớn> rồi /roadmap_save trước.",
     );
     return;
   }
@@ -1603,7 +1795,7 @@ async function runRoadmapApproveAllFlow(ctx) {
   await ctx.reply(
     `Đã duyệt ${changedCount} bài từ DRAFT/FAILED/PROCESSING -> PENDING.\n` +
       `Tổng bài: ${stats.total}\n` +
-      `Hiện tại: pending=${stats.pending}, drafted=${stats.drafted}, posted=${stats.posted}.`
+      `Hiện tại: pending=${stats.pending}, drafted=${stats.drafted}, posted=${stats.posted}.`,
   );
 }
 
@@ -1637,7 +1829,9 @@ async function runRoadmapEditFlow(ctx, rawArg) {
     edited_at: new Date().toISOString(),
   });
   await saveRoadmap(updated);
-  await ctx.reply(`Đã sửa ${formatRoadmapItemLabel(found)}.\nTopic mới: ${newTopic}\nTrạng thái: DRAFT`);
+  await ctx.reply(
+    `Đã sửa ${formatRoadmapItemLabel(found)}.\nTopic mới: ${newTopic}\nTrạng thái: DRAFT`,
+  );
 }
 
 async function runRoadmapSetTypeFlow(ctx, rawArg) {
@@ -1724,11 +1918,11 @@ async function runRoadmapClearFlow(ctx, rawArg) {
     return;
   }
 
-  const confirm = String(rawArg || "").trim().toLowerCase();
+  const confirm = String(rawArg || "")
+    .trim()
+    .toLowerCase();
   if (confirm !== "confirm") {
-    await ctx.reply(
-      "Để xóa toàn bộ roadmap, dùng: /roadmap_clear confirm"
-    );
+    await ctx.reply("Để xóa toàn bộ roadmap, dùng: /roadmap_clear confirm");
     return;
   }
 
@@ -1746,10 +1940,12 @@ async function runStorageClearFlow(ctx, rawArg) {
     return;
   }
 
-  const confirm = String(rawArg || "").trim().toLowerCase();
+  const confirm = String(rawArg || "")
+    .trim()
+    .toLowerCase();
   if (confirm !== "confirm") {
     await ctx.reply(
-      "Để xóa toàn bộ dữ liệu lưu trữ, dùng: /storage_clear confirm"
+      "Để xóa toàn bộ dữ liệu lưu trữ, dùng: /storage_clear confirm",
     );
     return;
   }
@@ -1771,7 +1967,7 @@ async function runStorageClearFlow(ctx, rawArg) {
   publishedPostStore.clear();
 
   await ctx.reply(
-    `[Storage] Đã xóa toàn bộ dữ liệu (${isPostgresStorageEnabled() ? "postgres" : "file"}).`
+    `[Storage] Đã xóa toàn bộ dữ liệu (${isPostgresStorageEnabled() ? "postgres" : "file"}).`,
   );
 }
 
@@ -1790,7 +1986,10 @@ async function runStorageInfoFlow(ctx) {
   const persistedDraftCount = await countPersistedDraftRecords();
   const appStateRows = usingPostgres ? await countAppStateRows() : 0;
 
-  const fallbackAllowed = parseBoolean(process.env.STORAGE_ALLOW_FILE_FALLBACK, false);
+  const fallbackAllowed = parseBoolean(
+    process.env.STORAGE_ALLOW_FILE_FALLBACK,
+    false,
+  );
   const migrateJson = parseBoolean(process.env.STORAGE_MIGRATE_JSON, false);
 
   const lines = [
@@ -1810,7 +2009,7 @@ async function runStorageInfoFlow(ctx) {
   }
 
   lines.push(
-    `- Roadmap: total=${roadmapStats.total}, draft=${roadmapStats.draft}, pending=${roadmapStats.pending}, drafted=${roadmapStats.drafted}, posted=${roadmapStats.posted}, failed=${roadmapStats.failed}`
+    `- Roadmap: total=${roadmapStats.total}, draft=${roadmapStats.draft}, pending=${roadmapStats.pending}, drafted=${roadmapStats.drafted}, posted=${roadmapStats.posted}, failed=${roadmapStats.failed}`,
   );
   lines.push(`- Draft records: ${persistedDraftCount}`);
 
@@ -1826,9 +2025,7 @@ async function runRoadmapRegenerateCurrentFlow(ctx) {
   const roadmap = await loadRoadmap();
   const draftedItem = findNextRoadmapItem(roadmap, ["drafted"]);
   if (!draftedItem) {
-    await ctx.reply(
-      "Không có bản nháp roadmap nào đang chờ duyệt để tạo lại."
-    );
+    await ctx.reply("Không có bản nháp roadmap nào đang chờ duyệt để tạo lại.");
     return;
   }
 
@@ -1846,7 +2043,7 @@ async function runRoadmapRegenerateCurrentFlow(ctx) {
   }
 
   await ctx.reply(
-    `[Roadmap] Đã hủy bản nháp ${formatRoadmapItemLabel(draftedItem)} và chuẩn bị tạo lại...`
+    `[Roadmap] Đã hủy bản nháp ${formatRoadmapItemLabel(draftedItem)} và chuẩn bị tạo lại...`,
   );
   const ok = await runRoadmapNextDraftFlow("manual");
   if (!ok) {
@@ -1862,7 +2059,7 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
   const adminChatId = ownerChatId();
   if (!adminChatId) {
     console.warn(
-      "[roadmap] Missing admin chat id. Configure MY_CHAT_ID_TEST (dev) or MY_CHAT_ID_PROD (prod). Skip auto draft."
+      "[roadmap] Missing admin chat id. Configure MY_CHAT_ID_TEST (dev) or MY_CHAT_ID_PROD (prod). Skip auto draft.",
     );
     return false;
   }
@@ -1881,7 +2078,7 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
         await bot.telegram.sendMessage(
           adminChatId,
           `[Roadmap] Khôi phục ${recovered.recoveredCount} bài PROCESSING bị stale ` +
-            `(>${recovered.staleMinutes} phút) -> PENDING.`
+            `(>${recovered.staleMinutes} phút) -> PENDING.`,
         );
       } catch (_notifyRecoveredError) {
         // no-op
@@ -1890,23 +2087,25 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
 
     const requireReviewBeforeNext = parseBoolean(
       process.env.ROADMAP_REQUIRE_REVIEW_BEFORE_NEXT,
-      true
+      true,
     );
     if (requireReviewBeforeNext) {
       const waitingDraft = findNextRoadmapItem(roadmap, ["drafted"]);
       if (waitingDraft) {
         if (trigger !== "cron") {
           await bot.telegram.sendMessage(
-          adminChatId,
-          `[Roadmap] ${formatRoadmapItemLabel(waitingDraft)} đang ở trạng thái DRAFTED, ` +
-              `hãy duyệt/hủy trước khi tạo bản nháp tiếp theo.`
-        );
+            adminChatId,
+            `[Roadmap] ${formatRoadmapItemLabel(waitingDraft)} đang ở trạng thái DRAFTED, ` +
+              `hãy duyệt/hủy trước khi tạo bản nháp tiếp theo.`,
+          );
         }
         return false;
       }
     }
 
-    const timezone = String(process.env.ROADMAP_TIMEZONE || "Asia/Ho_Chi_Minh").trim();
+    const timezone = String(
+      process.env.ROADMAP_TIMEZONE || "Asia/Ho_Chi_Minh",
+    ).trim();
     const scheduledPick = findNextRoadmapItemBySchedule(roadmap, ["pending"], {
       timezone,
       // Cron chạy theo lịch type. Manual cho phép fallback để dễ test/điều hành.
@@ -1917,7 +2116,7 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
       if (trigger !== "cron") {
         await bot.telegram.sendMessage(
           adminChatId,
-          `[Roadmap] Không có bài PENDING khớp lịch hôm nay: ${scheduledPick.rule.label}.`
+          `[Roadmap] Không có bài PENDING khớp lịch hôm nay: ${scheduledPick.rule.label}.`,
         );
       }
       return false;
@@ -1938,7 +2137,7 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
     statusMessage = await bot.telegram.sendMessage(
       adminChatId,
       `[Roadmap/${triggerLabel}] Đang xử lý ${nextLabel} [${nextSeriesType}]` +
-        `${scheduledPick.usedFallback ? " [fallback]" : ""}: ${next.topic}`
+        `${scheduledPick.usedFallback ? " [fallback]" : ""}: ${next.topic}`,
     );
 
     const onStep = async (_index, text) => {
@@ -1947,7 +2146,7 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
           adminChatId,
           statusMessage.message_id,
           undefined,
-          `[Roadmap] ${nextLabel} [${nextSeriesType}]: ${text}`
+          `[Roadmap] ${nextLabel} [${nextSeriesType}]: ${text}`,
         );
       } catch (_error) {
         await bot.telegram.sendMessage(adminChatId, `[Roadmap] ${text}`);
@@ -1985,12 +2184,12 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
       pseudoCtx,
       savedDraft.imageAsset,
       savedDraft.postText,
-      savedDraft.draftId
+      savedDraft.draftId,
     );
     await bot.telegram.sendMessage(
       adminChatId,
       `[Roadmap] ${nextLabel} [${nextSeriesType}] đã có bản thảo. ` +
-        `Bấm "Duyệt & Đăng bài" để lên sóng.`
+        `Bấm "Duyệt & Đăng bài" để lên sóng.`,
     );
     return true;
   } catch (error) {
@@ -2013,7 +2212,7 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
         await bot.telegram.sendMessage(
           adminChatId,
           `[Roadmap] Tạo bản nháp thất bại` +
-            `${processingDay ? ` (${processingDay})` : ""}: ${error.message}`
+            `${processingDay ? ` (${processingDay})` : ""}: ${error.message}`,
         );
       }
     } catch (_notifyError) {
@@ -2032,9 +2231,14 @@ function initRoadmapScheduler() {
     return;
   }
 
-  const testIntervalMinutes = parsePositiveInt(process.env.ROADMAP_TEST_INTERVAL_MINUTES, 0);
+  const testIntervalMinutes = parsePositiveInt(
+    process.env.ROADMAP_TEST_INTERVAL_MINUTES,
+    0,
+  );
   const useTestInterval = testIntervalMinutes >= 1 && testIntervalMinutes <= 59;
-  const timezone = String(process.env.ROADMAP_TIMEZONE || "Asia/Ho_Chi_Minh").trim();
+  const timezone = String(
+    process.env.ROADMAP_TIMEZONE || "Asia/Ho_Chi_Minh",
+  ).trim();
 
   if (useTestInterval) {
     const cronExpr = `*/${testIntervalMinutes} * * * *`;
@@ -2043,11 +2247,11 @@ function initRoadmapScheduler() {
       async () => {
         await runRoadmapNextDraftFlow("cron:test");
       },
-      { timezone }
+      { timezone },
     );
     console.log(
       `[roadmap] Scheduler enabled: "${cronExpr}" (${timezone}) [test interval=${testIntervalMinutes}m]` +
-        " | type-schedule: T2/T3/T5/T7=study, T4/T6/CN=talk"
+        " | type-schedule: T2/T3/T5/T7=study, T4/T6/CN=talk",
     );
     return;
   }
@@ -2076,21 +2280,21 @@ function initRoadmapScheduler() {
       async () => {
         await runRoadmapNextDraftFlow(`cron:${slot.key}`);
       },
-      { timezone }
+      { timezone },
     );
   }
 
   console.log(
     `[roadmap] Scheduler enabled (${timezone}): ` +
-      scheduleSlots.map((slot) => `${slot.label}="${slot.cronExpr}"`).join(", ") +
-      " | type-schedule: T2/T3/T5/T7=study, T4/T6/CN=talk"
+      scheduleSlots
+        .map((slot) => `${slot.label}="${slot.cronExpr}"`)
+        .join(", ") +
+      " | type-schedule: T2/T3/T5/T7=study, T4/T6/CN=talk",
   );
 }
 
 bot.start((ctx) => {
-  ctx.reply(
-    "Chào Tiến! Tôi đã sẵn sàng research, viết bài và tạo banner."
-  );
+  ctx.reply("Chào Tiến! Tôi đã sẵn sàng research, viết bài và tạo banner.");
 });
 
 bot.help((ctx) => {
@@ -2119,7 +2323,7 @@ bot.help((ctx) => {
       "- /roadmap_regen: Hủy bản nháp roadmap hiện tại và tạo lại.\n\n" +
       "3) Storage\n" +
       "- /storage_info: Xem storage đang dùng (postgres/file) + số liệu hiện tại.\n" +
-      "- /storage_clear confirm: Xóa toàn bộ dữ liệu lưu trữ (roadmap + draft)."
+      "- /storage_clear confirm: Xóa toàn bộ dữ liệu lưu trữ (roadmap + draft).",
   );
 });
 
@@ -2337,7 +2541,7 @@ bot.on("text", async (ctx) => {
   // Chặn xử lý trùng cho các command đã có bot.command riêng.
   if (
     /^\/(?:start|help|delete|rewrite|edit_cancel|storage_clear|storage_info|roadmap(?:_study|_talk|_summary|_next|_regen|_save|_discard|_list|_approve_all|_approve|_edit|_type|_delete|_clear)?)(?:@\w+)?\b/i.test(
-      userText
+      userText,
     )
   ) {
     return;
@@ -2398,7 +2602,9 @@ bot.on("text", async (ctx) => {
   }
 
   if (userText.startsWith("/roadmap_approve")) {
-    const target = userText.replace(/^\/roadmap_approve(?:@\w+)?\s*/i, "").trim();
+    const target = userText
+      .replace(/^\/roadmap_approve(?:@\w+)?\s*/i, "")
+      .trim();
     await runRoadmapApproveFlow(ctx, target);
     return;
   }
@@ -2416,7 +2622,9 @@ bot.on("text", async (ctx) => {
   }
 
   if (userText.startsWith("/roadmap_delete")) {
-    const target = userText.replace(/^\/roadmap_delete(?:@\w+)?\s*/i, "").trim();
+    const target = userText
+      .replace(/^\/roadmap_delete(?:@\w+)?\s*/i, "")
+      .trim();
     await runRoadmapDeleteFlow(ctx, target);
     return;
   }
@@ -2451,7 +2659,9 @@ bot.on("text", async (ctx) => {
   }
 
   if (userText.startsWith("/roadmap_summary")) {
-    const topic = userText.replace(/^\/roadmap_summary(?:@\w+)?\s*/i, "").trim();
+    const topic = userText
+      .replace(/^\/roadmap_summary(?:@\w+)?\s*/i, "")
+      .trim();
     await runRoadmapCreateFlow(ctx, topic, { defaultSeriesType: "summary" });
     return;
   }
@@ -2469,7 +2679,9 @@ bot.on("text", async (ctx) => {
       return;
     }
 
-    const statusMsg = await ctx.reply(`[1/4] Đang research thông tin mới nhất về: ${topic}...`);
+    const statusMsg = await ctx.reply(
+      `[1/4] Đang research thông tin mới nhất về: ${topic}...`,
+    );
 
     try {
       const draft = await buildDraftFromTopic(topic, {
@@ -2482,11 +2694,16 @@ bot.on("text", async (ctx) => {
         source: "manual_post",
       });
 
-      await sendDraftPreview(ctx, savedDraft.imageAsset, savedDraft.postText, savedDraft.draftId);
+      await sendDraftPreview(
+        ctx,
+        savedDraft.imageAsset,
+        savedDraft.postText,
+        savedDraft.draftId,
+      );
       await updateStatus(
         ctx,
         statusMsg,
-        "Hoàn tất quy trình Deep Research. Bản thảo đã sẵn sàng để duyệt."
+        "Hoàn tất quy trình Deep Research. Bản thảo đã sẵn sàng để duyệt.",
       );
     } catch (error) {
       console.error("[bot] Post workflow error:", error.message);
@@ -2495,9 +2712,13 @@ bot.on("text", async (ctx) => {
         ? "AI suy nghĩ quá lâu (timeout). Tiến thử ra lệnh /post lại nhé!"
         : error.message;
 
-      await updateStatus(ctx, statusMsg, "Quy trình bị gián đoạn. Đang báo lỗi cho Tiến...");
+      await updateStatus(
+        ctx,
+        statusMsg,
+        "Quy trình bị gián đoạn. Đang báo lỗi cho Tiến...",
+      );
       await ctx.reply(
-        `Tiến ơi, tôi đang bị kẹt trong dòng suy nghĩ.\n\nLỗi: ${friendlyMessage}`
+        `Tiến ơi, tôi đang bị kẹt trong dòng suy nghĩ.\n\nLỗi: ${friendlyMessage}`,
       );
     }
 
@@ -2520,7 +2741,9 @@ bot.catch(async (error, ctx) => {
   console.error("[bot] Unhandled middleware error:", error);
   try {
     if (ctx?.chat?.id && String(ctx.chat.id) === ownerChatId()) {
-      await ctx.reply("Tiến ơi, tôi gặp lỗi ngoài dự kiến. Thử lại giúp mình nhé!");
+      await ctx.reply(
+        "Tiến ơi, tôi gặp lỗi ngoài dự kiến. Thử lại giúp mình nhé!",
+      );
     }
   } catch (notifyError) {
     console.error("[bot] Failed to notify error to user:", notifyError.message);
@@ -2544,24 +2767,34 @@ async function handleRegenImageAction(ctx, draftId = "") {
   }
 
   if (!ENABLE_IMAGE_GENERATION) {
-    await ctx.answerCbQuery("Đang tắt tạm thời tính năng tạo ảnh.", { show_alert: true });
+    await ctx.answerCbQuery("Đang tắt tạm thời tính năng tạo ảnh.", {
+      show_alert: true,
+    });
     return;
   }
 
   await ctx.answerCbQuery("Đang tạo ảnh mới...");
 
-  const newImageAsset = await generateImageAsset(draft.imageMeta || draft.topic, "default");
+  const newImageAsset = await generateImageAsset(
+    draft.imageMeta || draft.topic,
+    "default",
+  );
   const updatedDraft = await storeDraft(
     chatId,
     {
-    ...draft,
-    imageAsset: newImageAsset,
-    imageUrl: newImageAsset?.url || null,
+      ...draft,
+      imageAsset: newImageAsset,
+      imageUrl: newImageAsset?.url || null,
     },
-    { draftId: draft.draftId || draftId }
+    { draftId: draft.draftId || draftId },
   );
 
-  await sendDraftPreview(ctx, newImageAsset, updatedDraft.postText, updatedDraft.draftId);
+  await sendDraftPreview(
+    ctx,
+    newImageAsset,
+    updatedDraft.postText,
+    updatedDraft.draftId,
+  );
 }
 
 async function handleEditContentAction(ctx, draftId = "") {
@@ -2584,7 +2817,7 @@ async function handleEditContentAction(ctx, draftId = "") {
   await ctx.answerCbQuery("Đã bật chế độ chỉnh sửa nội dung.");
   await ctx.reply(
     "Gửi feedback chỉnh sửa cho bản thảo (ví dụ: rút ngắn hơn, đổi hook, thêm ví dụ ngắn).\n" +
-      "Khi không muốn chỉnh nữa, dùng /edit_cancel."
+      "Khi không muốn chỉnh nữa, dùng /edit_cancel.",
   );
 }
 
@@ -2598,7 +2831,9 @@ async function handleConfirmPostAction(ctx, draftId = "") {
 
   const draft = await resolveDraftByAction(chatId, draftId);
   if (!draft) {
-    await ctx.answerCbQuery("Không tìm thấy bản thảo để đăng.", { show_alert: true });
+    await ctx.answerCbQuery("Không tìm thấy bản thảo để đăng.", {
+      show_alert: true,
+    });
     return;
   }
 
@@ -2616,7 +2851,7 @@ async function handleConfirmPostAction(ctx, draftId = "") {
 
     const fbPostId = await postToFacebook(
       draft.postText,
-      draft.imageAsset || draft.imageUrl || null
+      draft.imageAsset || draft.imageUrl || null,
     );
     rememberPublishedPost(chatId, fbPostId);
 
@@ -2644,7 +2879,7 @@ async function handleConfirmPostAction(ctx, draftId = "") {
         `ID bài viết: \`${fbPostId}\`\n\n` +
         `Nếu muốn xóa bài này, gõ:\n` +
         `\`/delete ${fbPostId}\``,
-      { parse_mode: "Markdown" }
+      { parse_mode: "Markdown" },
     );
   } catch (error) {
     await ctx.reply(`Đăng bài thất bại: ${error.message}`);

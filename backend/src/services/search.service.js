@@ -130,6 +130,16 @@ async function runTavilySearch(apiKey, query, options = {}) {
     max_results: Number(options.maxResults || 8),
   };
 
+  const topic = String(options.topic || "").trim().toLowerCase();
+  if (topic) {
+    payload.topic = topic;
+  }
+
+  const days = Number(options.days || 0);
+  if (Number.isFinite(days) && days > 0) {
+    payload.days = Math.floor(days);
+  }
+
   const includeDomains = Array.isArray(options.includeDomains)
     ? options.includeDomains.filter(Boolean)
     : [];
@@ -164,6 +174,8 @@ async function researchToday(query, options = {}) {
       ? options.include_domains_vi
       : DEFAULT_VI_DOMAINS;
     const bilingual = options.bilingual !== false;
+    const searchTopic = String(options.topic || "").trim().toLowerCase();
+    const searchDays = Number(options.days || 0);
 
     const englishTopicRaw = await askAI(
       `Translate this tech topic to concise English search keywords only: ${query}`,
@@ -185,6 +197,8 @@ async function researchToday(query, options = {}) {
         searchDepth,
         maxResults: maxResultsPerQuery,
         includeDomains: includeDomainsEn,
+        topic: searchTopic,
+        days: searchDays,
       }).then((results) => ({
         sourceTag: "EN",
         results,
@@ -197,6 +211,8 @@ async function researchToday(query, options = {}) {
           searchDepth,
           maxResults: maxResultsPerQuery,
           includeDomains: includeDomainsVi,
+          topic: searchTopic,
+          days: searchDays,
         }).then((results) => ({
           sourceTag: "VI",
           results,
