@@ -2,8 +2,6 @@ const fs = require("fs");
 const path = require("path");
 require("dotenv").config();
 const cron = require("node-cron");
-const express = require("express");
-const cors = require("cors");
 const { Telegraf, Markup } = require("telegraf");
 const {
   askAI,
@@ -116,12 +114,10 @@ const TELEGRAM_MESSAGE_SAFE_LIMIT = 3800;
 let isRoadmapJobRunning = false;
 let botLockFd = null;
 let botLockPath = "";
-let httpServer = null;
 const ENABLE_IMAGE_GENERATION = parseBoolean(
   process.env.ENABLE_IMAGE_GENERATION,
   false,
 );
-const HTTP_PORT = Number(process.env.PORT || 4000);
 
 assertStorageConfiguration();
 
@@ -221,9 +217,6 @@ function acquireBotLock() {
 acquireBotLock();
 
 const bot = new Telegraf(telegramToken, { handlerTimeout: 600000 });
-const apiApp = express();
-apiApp.use(cors());
-apiApp.use(express.json({ limit: "2mb" }));
 
 console.log(
   `[boot] APP_ENV=${APP_ENV} (telegram mode: ${IS_PRODUCTION_ENV ? "production" : "development"})`,
@@ -1737,16 +1730,6 @@ function createTelegramCtxProxy(chatId) {
   };
 }
 
-apiApp.get("/api/health", (_req, res) => {
-  res.json({
-    ok: true,
-    service: "the-little-coder-ai-backend",
-    env: APP_ENV,
-    storage: isPostgresStorageEnabled() ? "postgres" : "file",
-    timestamp: new Date().toISOString(),
-  });
-});
-
 async function runRoadmapCreateFlow(ctx, sourceTopic, options = {}) {
   const chatId = String(ctx.chat.id);
   if (chatId !== ownerChatId()) {
@@ -3151,25 +3134,15 @@ bot.action("cancel_post", async (ctx) => {
 
 initRoadmapScheduler();
 
-httpServer = apiApp.listen(HTTP_PORT, () => {
-  console.log(`[api] listening on http://localhost:${HTTP_PORT}`);
-});
-
 bot.launch().then(() => {
   console.log("[bot] Telegram bot is online and waiting for commands...");
 });
 
 process.once("SIGINT", () => {
-  if (httpServer) {
-    httpServer.close();
-  }
   releaseBotLock();
   bot.stop("SIGINT");
 });
 process.once("SIGTERM", () => {
-  if (httpServer) {
-    httpServer.close();
-  }
   releaseBotLock();
   bot.stop("SIGTERM");
 });
