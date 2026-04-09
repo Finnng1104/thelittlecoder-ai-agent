@@ -5,13 +5,10 @@ const cron = require("node-cron");
 const { Telegraf, Markup } = require("telegraf");
 const {
   askAI,
-  DEEP_RESEARCH_PROMPT,
-  NEWS_ENGINE_PROMPT,
   REFINE_CONTENT_PROMPT,
   ROADMAP_GENERATOR_PROMPT,
   SERIES_POST_PROMPT,
 } = require("./src/services/ai.service");
-const { researchToday } = require("./src/services/search.service");
 const {
   generateImageAsset,
   downloadImageBuffer,
@@ -49,6 +46,10 @@ const {
   resolvePostgresDescriptor,
   countAppStateRows,
 } = require("./src/services/db.service");
+const {
+  buildDraftFromTopic,
+} = require("./src/services/post.service");
+const { createCommandService } = require("./src/services/command.service");
 
 function firstNonEmpty(...values) {
   for (const value of values) {
@@ -916,6 +917,24 @@ function parseStructuredAiOutput(rawText, topic) {
   return structured;
 }
 
+function buildPostDraftOptions(extra = {}) {
+  return {
+    ...extra,
+    enableImageGeneration: ENABLE_IMAGE_GENERATION,
+    inferManualPostIntent,
+    parseStructuredAiOutput,
+    ensureSeriesHeading,
+    buildSeriesImageShortTitle,
+  };
+}
+
+const commandService = createCommandService({
+  updateStatus,
+  storeDraft,
+  sendDraftPreview,
+  buildPostDraftOptions,
+});
+
 function parseRoadmapOutput(rawText, sourceTopic) {
   const parsedArray = extractFirstJsonArray(rawText);
   if (!parsedArray) {
@@ -1486,151 +1505,6 @@ async function runDraftEditFeedbackFlow(ctx, feedbackText) {
     await ctx.reply("Bạn có thể gửi feedback khác để mình thử chỉnh lại.");
     return true;
   }
-}
-
-async function buildDraftFromTopic(topic, options = {}) {
-  const onStep =
-    typeof options.onStep === "function" ? options.onStep : async () => {};
-  const seriesInfo =
-    options.seriesInfo && typeof options.seriesInfo === "object"
-      ? options.seriesInfo
-      : null;
-  const isSeries = Number.isFinite(Number(seriesInfo?.day));
-  const seriesDay = isSeries
-    ? Math.max(1, Math.floor(Number(seriesInfo.day)))
-    : null;
-  const seriesTotal = Number.isFinite(Number(seriesInfo?.total))
-    ? Math.max(1, Math.floor(Number(seriesInfo.total)))
-    : null;
-  const seriesImageHint = isSeries
-    ? String(seriesInfo?.image_hint || "").trim()
-    : "";
-  const postIntent = isSeries ? "series" : inferManualPostIntent(topic);
-  const currentDate = new Date().toLocaleDateString("vi-VN", {
-    timeZone: process.env.ROADMAP_TIMEZONE || "Asia/Ho_Chi_Minh",
-  });
-
-  await onStep(1, `[1/5] Đang research thông tin mới nhất về: ${topic}...`);
-  const research = await researchToday(topic, {
-    search_depth: "advanced",
-    max_results: isSeries ? 6 : postIntent === "news" ? 5 : 10,
-    max_total_results: isSeries ? 10 : postIntent === "news" ? 10 : 16,
-    bilingual: true,
-    topic: postIntent === "news" ? "news" : undefined,
-    days: postIntent === "news" ? 1 : undefined,
-  });
-
-  await onStep(
-    2,
-    `[2/5] Đã research ${research.totalResults} nguồn (EN + VI). Đang viết bản thảo v1...`,
-  );
-
-  const draft1Raw = await askAI(
-    isSeries
-      ? `Đây là bài thuộc series roadmap.\n` +
-          `Day hiện tại: ${seriesDay}\n` +
-          `${seriesTotal ? `Tổng số day trong series: ${seriesTotal}\n` : ""}` +
-          `Chủ đề Day ${seriesDay}: ${topic}\n` +
-          `${seriesImageHint ? `image_hint từ roadmap: ${seriesImageHint}\n` : ""}` +
-          `Dữ liệu research:\n${research.infoText}\n\n` +
-          `Từ khóa research EN: ${research.queries?.en || research.query}\n` +
-          `Từ khóa research VI: ${research.queries?.vi || research.originalQuery}\n\n` +
-          "Hãy viết ngắn gọn, dễ hiểu, đúng format series và trả về JSON schema."
-      : `Dữ liệu research gốc:\n${research.infoText}\n\n` +
-          `Chủ đề gốc: ${topic}\n` +
-          `Ngày hiện tại: ${currentDate}\n` +
-          `Từ khóa research EN: ${research.queries?.en || research.query}\n` +
-          `Từ khóa research VI: ${research.queries?.vi || research.originalQuery}\n\n` +
-          (postIntent === "news"
-            ? "Đây là bài BẢN TIN CÔNG NGHỆ.\n" +
-              "Tập trung vào: cái gì mới, ảnh hưởng gì tới dev, và hành động tiếp theo.\n" +
-              "KHÔNG kể chuyện quá khứ dài dòng, KHÔNG than thở.\n"
-            : postIntent === "tutorial"
-              ? "Đây là bài hướng dẫn kỹ thuật. Viết rõ ràng, thực chiến, có checklist ngắn nếu cần.\n"
-              : "Đây là bài chia sẻ góc nhìn/thực chiến, không viết checklist tutorial dài.\n") +
-          "Hãy tạo output JSON đúng schema yêu cầu. Không trả về markdown, không lời giải thích.",
-    {
-      systemPrompt: isSeries
-        ? SERIES_POST_PROMPT
-        : postIntent === "news"
-          ? NEWS_ENGINE_PROMPT
-          : DEEP_RESEARCH_PROMPT,
-      model:
-        process.env.AI_MODEL ||
-        process.env.OPENROUTER_DEEP_MODEL ||
-        process.env.OPENROUTER_MODEL,
-      expectJson: true,
-      temperature: isSeries ? 0.25 : 0.35,
-      timeout: 300000,
-      throwOnError: true,
-    },
-  );
-
-  await onStep(3, "[3/5] Đang tự phản biện và tinh chỉnh để loại bỏ văn mẫu AI...");
-
-  const refinedRaw = await askAI(
-    `Đây là bản thảo JSON bạn vừa viết:\n${draft1Raw}\n\n` +
-      "Hãy tự review và chỉnh lại theo style The Little Coder: tự nhiên, thực chiến, bỏ cụm sáo rỗng, giữ ý chính.\n" +
-      "Trả về JSON đúng schema cũ, không giải thích thêm.",
-    {
-      systemPrompt: isSeries
-        ? SERIES_POST_PROMPT
-        : postIntent === "news"
-          ? NEWS_ENGINE_PROMPT
-          : DEEP_RESEARCH_PROMPT,
-      model:
-        process.env.AI_MODEL ||
-        process.env.OPENROUTER_DEEP_MODEL ||
-        process.env.OPENROUTER_MODEL,
-      expectJson: true,
-      temperature: isSeries ? 0.2 : 0.3,
-      timeout: 300000,
-      throwOnError: true,
-    },
-  );
-
-  await onStep(4, "[4/5] Đang parse JSON và dọn đẹp nội dung Facebook...");
-  const structured = parseStructuredAiOutput(refinedRaw, topic);
-  let finalPost = formatForFacebook(structured.post_content);
-  if (isSeries) {
-    finalPost = ensureSeriesHeading(finalPost, seriesDay, topic);
-  }
-  const imageMeta = {
-    topic,
-    image_short_title: isSeries
-      ? buildSeriesImageShortTitle(
-          seriesDay,
-          topic,
-          structured.image_short_title,
-          seriesImageHint,
-        )
-      : structured.image_short_title,
-    ant_action: structured.ant_action,
-    log_message: structured.log_message,
-  };
-
-  let imageAsset = null;
-  if (ENABLE_IMAGE_GENERATION) {
-    await onStep(
-      5,
-      "[5/5] Gemini đang tạo banner theo bố cục The Little Coder...",
-    );
-    imageAsset = await generateImageAsset(imageMeta, "default");
-  } else {
-    await onStep(
-      5,
-      "[5/5] Đang tắt tạm thời tính năng tạo ảnh, gửi bản nháp text để duyệt...",
-    );
-  }
-
-  return {
-    topic,
-    postText: finalPost,
-    imageMeta,
-    imageAsset,
-    imageUrl: imageAsset?.url || null,
-    research,
-  };
 }
 
 async function runRewriteFlow(ctx, rawContent) {
@@ -2331,14 +2205,17 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
       }
     };
 
-    const draft = await buildDraftFromTopic(next.topic, {
-      onStep,
-      seriesInfo: {
-        day: Number(next.day) || 1,
-        total: roadmap.length,
-        image_hint: next.image_hint || "",
-      },
-    });
+    const draft = await buildDraftFromTopic(
+      next.topic,
+      buildPostDraftOptions({
+        onStep,
+        seriesInfo: {
+          day: Number(next.day) || 1,
+          total: roadmap.length,
+          image_hint: next.image_hint || "",
+        },
+      }),
+    );
     const draftWithRoadmap = {
       ...draft,
       source: "roadmap",
@@ -2852,54 +2729,7 @@ bot.on("text", async (ctx) => {
 
   if (userText.startsWith("/post")) {
     const topic = userText.replace("/post", "").trim();
-    if (!topic) {
-      await ctx.reply("Vui lòng dùng đúng: /post <chủ đề>");
-      return;
-    }
-
-    const statusMsg = await ctx.reply(
-      `[1/5] Đang research thông tin mới nhất về: ${topic}...`,
-    );
-
-    try {
-      const draft = await buildDraftFromTopic(topic, {
-        onStep: async (_step, text) => {
-          await updateStatus(ctx, statusMsg, text);
-        },
-      });
-      const savedDraft = await storeDraft(chatId, {
-        ...draft,
-        source: "manual_post",
-      });
-
-      await sendDraftPreview(
-        ctx,
-        savedDraft.imageAsset,
-        savedDraft.postText,
-        savedDraft.draftId,
-      );
-      await updateStatus(
-        ctx,
-        statusMsg,
-        "Hoàn tất quy trình Deep Research. Bản thảo đã sẵn sàng để duyệt.",
-      );
-    } catch (error) {
-      console.error("[bot] Post workflow error:", error.message);
-      const lower = String(error.message || "").toLowerCase();
-      const friendlyMessage = lower.includes("timeout")
-        ? "AI suy nghĩ quá lâu (timeout). Tiến thử ra lệnh /post lại nhé!"
-        : error.message;
-
-      await updateStatus(
-        ctx,
-        statusMsg,
-        "Quy trình bị gián đoạn. Đang báo lỗi cho Tiến...",
-      );
-      await ctx.reply(
-        `Tiến ơi, tôi đang bị kẹt trong dòng suy nghĩ.\n\nLỗi: ${friendlyMessage}`,
-      );
-    }
-
+    await commandService.post(ctx, topic, { chatId });
     return;
   }
 
