@@ -1,4 +1,5 @@
 const { runManualPostFlow } = require("./post.service");
+const { runManualNewsFlow } = require("./news.service");
 
 function createCommandService(dependencies = {}) {
   const updateStatus = dependencies.updateStatus;
@@ -14,6 +15,21 @@ function createCommandService(dependencies = {}) {
           : options.buildDraftOptions || {};
 
       return runManualPostFlow(ctx, topic, {
+        chatId: String(options.chatId || ctx?.chat?.id || ""),
+        updateStatus,
+        storeDraft,
+        sendDraftPreview,
+        buildDraftOptions: draftOptions,
+      });
+    },
+
+    async news(ctx, topic, options = {}) {
+      const draftOptions =
+        typeof buildPostDraftOptions === "function"
+          ? buildPostDraftOptions(options.buildDraftOptions || {})
+          : options.buildDraftOptions || {};
+
+      return runManualNewsFlow(ctx, topic, {
         chatId: String(options.chatId || ctx?.chat?.id || ""),
         updateStatus,
         storeDraft,

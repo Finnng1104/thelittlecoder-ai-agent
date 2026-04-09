@@ -46,9 +46,7 @@ const {
   resolvePostgresDescriptor,
   countAppStateRows,
 } = require("./src/services/db.service");
-const {
-  buildDraftFromTopic,
-} = require("./src/services/post.service");
+const { buildDraftFromTopic } = require("./src/services/draft-builder.service");
 const { createCommandService } = require("./src/services/command.service");
 
 function firstNonEmpty(...values) {
@@ -511,31 +509,6 @@ function buildTopicFromRawContent(rawContent) {
   return cleaned.slice(0, 120);
 }
 
-function inferManualPostIntent(topic) {
-  const normalized = toAsciiLower(topic);
-  if (!normalized) {
-    return "insight";
-  }
-
-  if (
-    /\b(tin tuc|tin moi|news|breaking|hom nay|today|cap nhat|update|xu huong|trend)\b/.test(
-      normalized,
-    )
-  ) {
-    return "news";
-  }
-
-  if (
-    /\b(tutorial|huong dan|cach lam|how to|step by step|setup|cai dat|hello world|vi du code|code along)\b/.test(
-      normalized,
-    )
-  ) {
-    return "tutorial";
-  }
-
-  return "insight";
-}
-
 function toCaption(postText) {
   const fullCaption = `BẢN THẢO CHẤT LƯỢNG CAO:\n\n${postText}`;
   if (fullCaption.length <= TELEGRAM_CAPTION_MAX) {
@@ -921,7 +894,6 @@ function buildPostDraftOptions(extra = {}) {
   return {
     ...extra,
     enableImageGeneration: ENABLE_IMAGE_GENERATION,
-    inferManualPostIntent,
     parseStructuredAiOutput,
     ensureSeriesHeading,
     buildSeriesImageShortTitle,
@@ -2356,7 +2328,8 @@ bot.help((ctx) => {
   ctx.reply(
     "Lệnh hiện tại:\n\n" +
       "1) Tạo bài nhanh\n" +
-      "- /post <chủ đề>: Research + tạo bản thảo để duyệt.\n" +
+      "- /post <chủ đề>: Viết bài chia sẻ/góc nhìn và tạo bản thảo để duyệt.\n" +
+      "- /news <chủ đề>: Viết bản tin công nghệ và tạo bản thảo để duyệt.\n" +
       "- /rewrite <nội dung thô>: Viết lại nội dung bạn đưa theo văn phong đã cấu hình.\n" +
       "- /edit_cancel: Hủy phiên chỉnh sửa bản thảo đang chờ feedback.\n" +
       "- /delete <post_id>: Xóa bài đã đăng trên Facebook.\n\n" +
@@ -2727,8 +2700,14 @@ bot.on("text", async (ctx) => {
     return;
   }
 
-  if (userText.startsWith("/post")) {
-    const topic = userText.replace("/post", "").trim();
+  if (/^\/news(?:@\w+)?\b/i.test(userText)) {
+    const topic = userText.replace(/^\/news(?:@\w+)?\s*/i, "").trim();
+    await commandService.news(ctx, topic, { chatId });
+    return;
+  }
+
+  if (/^\/post(?:@\w+)?\b/i.test(userText)) {
+    const topic = userText.replace(/^\/post(?:@\w+)?\s*/i, "").trim();
     await commandService.post(ctx, topic, { chatId });
     return;
   }
