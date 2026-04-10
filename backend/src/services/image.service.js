@@ -231,6 +231,52 @@ function sanitizePanelMainText(value, fallback) {
   return DEFAULT_PANEL_MAIN_TEXT;
 }
 
+function trimDisplayText(value, maxLength = 80) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 3)}...`;
+}
+
+function shouldShowLocalizedTitle(localizedTitle, englishTitle) {
+  const localized = trimDisplayText(localizedTitle, 120);
+  if (!localized) {
+    return false;
+  }
+
+  const normalizedLocalized = normalizeAscii(localized).toUpperCase();
+  const normalizedEnglish = normalizeAscii(englishTitle).toUpperCase();
+  return (
+    normalizedLocalized !== normalizedEnglish ||
+    hasVietnameseDiacritics(localizedTitle)
+  );
+}
+
+function buildImagePromptPackage(topicOrPayload, emotion = "default") {
+  const input = resolveImageInput(topicOrPayload);
+  const topic = input.topic || "web development topic";
+  const hintTitle = buildEnglishTitleHint(topic);
+  const imageTitleEn = sanitizePanelMainText(input.imageShortTitle, hintTitle);
+  const localizedTitle = trimDisplayText(topic, 120) || imageTitleEn;
+  const imageTitleDisplay = shouldShowLocalizedTitle(
+    localizedTitle,
+    imageTitleEn,
+  )
+    ? `${imageTitleEn} (${localizedTitle})`
+    : imageTitleEn;
+
+  return {
+    prompt: buildImagePrompt(topicOrPayload, emotion),
+    imageTitleEn,
+    imageTitleLocalized: localizedTitle,
+    imageTitleDisplay,
+  };
+}
+
 function buildImagePrompt(topicOrPayload, emotion = "default") {
   const input = resolveImageInput(topicOrPayload);
   const topic = input.topic || "web development topic";
@@ -594,6 +640,7 @@ async function downloadImageBuffer(imageUrl, withMeta = false) {
 }
 
 module.exports = {
+  buildImagePromptPackage,
   generateImageAsset,
   generateImageUrl,
   generateImageUrlFromPrompt,

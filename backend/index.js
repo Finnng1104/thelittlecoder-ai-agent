@@ -10,6 +10,7 @@ const {
   SERIES_POST_PROMPT,
 } = require("./src/services/ai.service");
 const {
+  buildImagePromptPackage,
   generateImageAsset,
   downloadImageBuffer,
 } = require("./src/services/image.service");
@@ -628,6 +629,17 @@ function ensureSeriesHeading(postText, day, topic) {
   return `${heading}\n\n${normalizedText}`;
 }
 
+function enrichImageMeta(imageMeta, emotion = "default") {
+  const baseMeta = imageMeta && typeof imageMeta === "object" ? imageMeta : {};
+  const promptPackage = buildImagePromptPackage(baseMeta, emotion);
+  return {
+    ...baseMeta,
+    image_prompt: promptPackage.prompt,
+    image_title_en: promptPackage.imageTitleEn,
+    image_title_display: promptPackage.imageTitleDisplay,
+  };
+}
+
 function extractFirstJsonObject(rawText) {
   const text = String(rawText || "").trim();
   if (!text) {
@@ -1244,11 +1256,47 @@ async function safeReplyLongText(ctx, text, extra) {
   }
 }
 
-async function sendDraftPreview(ctx, imageAsset, postText, draftId = "") {
+async function sendDraftImagePromptGuide(ctx, imageMeta) {
+  const prompt = String(imageMeta?.image_prompt || "").trim();
+  if (!prompt) {
+    return;
+  }
+
+  const lines = [
+    "THÔNG TIN ẢNH THAM KHẢO",
+    "Phần này KHÔNG nằm trong nội dung đăng Facebook tự động.",
+  ];
+
+  const imageTitle = String(
+    imageMeta?.image_title_display ||
+      imageMeta?.image_title_en ||
+      imageMeta?.image_short_title ||
+      "",
+  ).trim();
+  if (imageTitle) {
+    lines.push(`Title ảnh: ${imageTitle}`);
+  }
+
+  lines.push("");
+  lines.push("Prompt ảnh:");
+  lines.push(prompt);
+
+  await safeReplyLongText(ctx, lines.join("\n"));
+}
+
+async function sendDraftPreview(
+  ctx,
+  imageAsset,
+  postText,
+  draftId = "",
+  options = {},
+) {
   const keyboard = buildDraftKeyboardWithId(draftId);
+  const imageMeta = options.imageMeta || null;
 
   if (!ENABLE_IMAGE_GENERATION) {
     await safeReplyLongText(ctx, `BẢN THẢO:\n\n${postText}`, keyboard);
+    await sendDraftImagePromptGuide(ctx, imageMeta);
     return;
   }
 
@@ -1444,7 +1492,7 @@ async function runDraftEditFeedbackFlow(ctx, feedbackText) {
       finalPost = ensureSeriesHeading(finalPost, seriesDay, draft.topic || "");
     }
 
-    const updatedImageMeta = {
+    const updatedImageMeta = enrichImageMeta({
       ...(draft.imageMeta || {}),
       topic: draft.topic || draft.imageMeta?.topic || "",
       image_short_title: isSeries
@@ -1457,7 +1505,7 @@ async function runDraftEditFeedbackFlow(ctx, feedbackText) {
         : structured.image_short_title || draft.imageMeta?.image_short_title,
       ant_action: structured.ant_action || draft.imageMeta?.ant_action,
       log_message: structured.log_message || draft.imageMeta?.log_message,
-    };
+    });
 
     const updatedDraft = await storeDraft(
       chatId,
@@ -1476,6 +1524,7 @@ async function runDraftEditFeedbackFlow(ctx, feedbackText) {
       updatedDraft.imageAsset,
       updatedDraft.postText,
       updatedDraft.draftId,
+      { imageMeta: updatedDraft.imageMeta },
     );
     await updateStatus(
       ctx,
@@ -1540,12 +1589,12 @@ async function runRewriteFlow(ctx, rawContent) {
       buildTopicFromRawContent(userRaw),
     );
     const finalPost = formatForFacebook(structured.post_content);
-    const imageMeta = {
+    const imageMeta = enrichImageMeta({
       topic: buildTopicFromRawContent(userRaw),
       image_short_title: structured.image_short_title,
       ant_action: structured.ant_action,
       log_message: structured.log_message,
-    };
+    });
 
     await updateStatus(
       ctx,
@@ -1568,7 +1617,9 @@ async function runRewriteFlow(ctx, rawContent) {
       rawContent: userRaw,
     });
 
-    await sendDraftPreview(ctx, imageAsset, finalPost, draft.draftId);
+    await sendDraftPreview(ctx, imageAsset, finalPost, draft.draftId, {
+      imageMeta: draft.imageMeta,
+    });
     await updateStatus(
       ctx,
       statusMsg,
@@ -2231,6 +2282,7 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
       savedDraft.imageAsset,
       savedDraft.postText,
       savedDraft.draftId,
+      { imageMeta: savedDraft.imageMeta },
     );
     await bot.telegram.sendMessage(
       adminChatId,
@@ -2930,6 +2982,7 @@ async function handleRegenImageAction(ctx, draftId = "") {
     newImageAsset,
     updatedDraft.postText,
     updatedDraft.draftId,
+    { imageMeta: updatedDraft.imageMeta },
   );
 }
 

@@ -5,7 +5,7 @@ const {
   SERIES_POST_PROMPT,
 } = require("./ai.service");
 const { researchToday } = require("./search.service");
-const { generateImageAsset } = require("./image.service");
+const { buildImagePromptPackage, generateImageAsset } = require("./image.service");
 const { formatForFacebook } = require("../utils/textFormatter");
 
 async function noop() {}
@@ -158,7 +158,7 @@ async function buildDraftFromTopic(topic, options = {}) {
     finalPost = ensureSeriesHeading(finalPost, seriesDay, topic);
   }
 
-  const imageMeta = {
+  const baseImageMeta = {
     topic,
     image_short_title: isSeries
       ? buildSeriesImageShortTitle(
@@ -170,6 +170,13 @@ async function buildDraftFromTopic(topic, options = {}) {
       : structured.image_short_title,
     ant_action: structured.ant_action,
     log_message: structured.log_message,
+  };
+  const imagePromptPackage = buildImagePromptPackage(baseImageMeta, "default");
+  const imageMeta = {
+    ...baseImageMeta,
+    image_prompt: imagePromptPackage.prompt,
+    image_title_en: imagePromptPackage.imageTitleEn,
+    image_title_display: imagePromptPackage.imageTitleDisplay,
   };
 
   let imageAsset = null;
@@ -240,6 +247,7 @@ async function runManualDraftFlow(ctx, topic, options = {}) {
       savedDraft.imageAsset,
       savedDraft.postText,
       savedDraft.draftId,
+      { imageMeta: savedDraft.imageMeta },
     );
     await updateStatus(
       ctx,
