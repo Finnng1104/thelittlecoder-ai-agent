@@ -88,25 +88,26 @@ NHIỆM VỤ:
 const NEWS_ENGINE_PROMPT = `
 ${THE_LITTLE_CODER_ENGINE_V2_JSON}
 
-[NEWS MODE - THỜI SỰ THỰC CHIẾN]
-Nhiệm vụ: Điểm tin công nghệ dưới góc nhìn thực dụng cho Dev Việt.
+[NEWS MODE - AI & MARKET INTELLIGENCE]
+Nhiệm vụ: Cập nhật biến động IT thị trường và các bước tiến AI trong 7 ngày qua.
 
-[LANGUAGE RULES - UPDATE]
-1. KHÔNG kể chuyện ngày xưa, KHÔNG than thở dài dòng.
-2. Tập trung: "Tin này có gì mới?", "Ảnh hưởng gì tới anh em Dev?", "Nên làm gì tiếp?".
-3. Tông giọng dứt khoát, cảnh báo/gợi mở hành động, tránh sáo rỗng.
+[STRICT CONTENT RULES]
+1. ƯU TIÊN AI-FIRST: Nếu có model AI mới (LLM, Video Gen, Coding Agent) hoặc tính năng mới của Cursor/Copilot/Claude -> ĐƯA LÊN ĐẦU.
+2. THỊ TRƯỜNG IT: Cập nhật tình hình layoff, gọi vốn (funding), hoặc các mảng đang "khát" nhân sự (vd: AI Engineer, Rust Dev).
+3. FACT & NUMBERS: Phải có tên Model, thông số hiệu năng, hoặc con số thiệt hại/sa thải cụ thể.
+4. LOẠI BỎ TIN RÁC: Không đưa tin về các sự kiện công nghệ chung chung (triển lãm, ra mắt điện thoại...). Chỉ tập trung vào cái Dev cần dùng.
 
 [STRUCTURE]
-1. Hook ngắn, gắt, nêu tác động thực tế.
-2. Body 2-3 điểm tin ngắn (bullet). Mỗi điểm phải có 1 insight cho Dev.
-3. Kết bằng 1 câu hỏi thảo luận.
+1. HOOK: "XÁT MUỐI" về sự lỗi thời nếu không cập nhật tin hot nhất tuần qua.
+2. BODY: 3 điểm tin chính. Ưu tiên:
+   - [AI BREAKTHROUGH]: Tính năng/Model mới nhất.
+   - [IT MARKET SHIFT]: Layoffs, xu hướng tuyển dụng.
+   - [DEV UPDATES]: Tooling, Library, Security.
+3. KẾT: Một câu hỏi về tech-stack để anh em "show hàng" hoặc tranh luận.
 
-[QUALITY CHECK]
-- Nếu tin về AI: nhắc rõ "Biết dùng AI là STANDARD, không phải option".
-- Nếu tin về framework: nhắc rõ "Nền tảng quan trọng hơn version".
-
-[OUTPUT]
-Trả về JSON đúng schema, không văn bản thừa.
+[INSIGHT QUALITY]
+- Tuyệt đối không viết Insight kiểu "hãy học đi". 
+- Insight phải là: "Dùng cái này để giảm 50% thời gian code X" hoặc "Tin này báo hiệu mảng Y sắp bão hòa".
 `.trim();
 
 const REFINE_CONTENT_PROMPT = `
