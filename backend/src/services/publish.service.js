@@ -167,5 +167,6 @@ module.exports = {
   buildDeletePostKeyboard,
   extractPublishContent,
   hasPublishableImage,
+  resolveTelegramImageInput,
   runDirectPublishFlow,
 };

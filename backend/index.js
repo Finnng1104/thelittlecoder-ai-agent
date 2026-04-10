@@ -48,11 +48,17 @@ const {
 } = require("./src/services/db.service");
 const { buildDraftFromTopic } = require("./src/services/draft-builder.service");
 const { createCommandService } = require("./src/services/command.service");
+const { runDueScheduledPostFlow } = require("./src/services/schedule.service");
 const {
   buildDeletePostKeyboard,
   extractPublishContent,
   hasPublishableImage,
 } = require("./src/services/publish.service");
+const {
+  clearAllScheduledPosts,
+  countScheduledPosts,
+  resolveScheduledPostPath,
+} = require("./src/services/scheduled-post.service");
 
 function firstNonEmpty(...values) {
   for (const value of values) {
@@ -116,6 +122,7 @@ const processedTextMessageKeys = new Set();
 const TELEGRAM_CAPTION_MAX = 1024;
 const TELEGRAM_MESSAGE_SAFE_LIMIT = 3800;
 let isRoadmapJobRunning = false;
+let isScheduledPostJobRunning = false;
 let botLockFd = null;
 let botLockPath = "";
 const ENABLE_IMAGE_GENERATION = parseBoolean(
@@ -1991,6 +1998,7 @@ async function runStorageClearFlow(ctx, rawArg) {
   } else {
     await saveRoadmap([]);
     await clearAllDraftRecords();
+    await clearAllScheduledPosts();
   }
 
   draftStore.clear();
@@ -2016,6 +2024,7 @@ async function runStorageInfoFlow(ctx) {
   const roadmap = await loadRoadmap();
   const roadmapStats = getRoadmapStats(roadmap);
   const persistedDraftCount = await countPersistedDraftRecords();
+  const scheduledPostCount = await countScheduledPosts("all");
   const appStateRows = usingPostgres ? await countAppStateRows() : 0;
 
   const fallbackAllowed = parseBoolean(
@@ -2038,12 +2047,14 @@ async function runStorageInfoFlow(ctx) {
   } else {
     lines.push(`- Roadmap file: ${resolveRoadmapPath()}`);
     lines.push(`- Draft file: ${resolveDraftFilePath()}`);
+    lines.push(`- Scheduled post file: ${resolveScheduledPostPath()}`);
   }
 
   lines.push(
     `- Roadmap: total=${roadmapStats.total}, draft=${roadmapStats.draft}, pending=${roadmapStats.pending}, drafted=${roadmapStats.drafted}, posted=${roadmapStats.posted}, failed=${roadmapStats.failed}`,
   );
   lines.push(`- Draft records: ${persistedDraftCount}`);
+  lines.push(`- Scheduled posts: ${scheduledPostCount}`);
 
   await ctx.reply(lines.join("\n"));
 }
@@ -2259,6 +2270,54 @@ async function runRoadmapNextDraftFlow(trigger = "manual") {
   }
 }
 
+async function runScheduledPostQueueFlow(trigger = "cron") {
+  if (isScheduledPostJobRunning) {
+    if (trigger !== "cron") {
+      console.log("[schedule] Skip trigger because previous job is still running.");
+    }
+    return 0;
+  }
+
+  isScheduledPostJobRunning = true;
+  try {
+    return await runDueScheduledPostFlow({
+      rememberPublishedPost,
+      sendMessage: (chatId, text, extra) =>
+        bot.telegram.sendMessage(chatId, text, extra),
+    });
+  } catch (error) {
+    console.error("[schedule] Scheduled publish error:", error.message);
+    return 0;
+  } finally {
+    isScheduledPostJobRunning = false;
+  }
+}
+
+function initScheduledPostScheduler() {
+  const enabled = parseBoolean(process.env.SCHEDULE_AUTO_ENABLED, true);
+  if (!enabled) {
+    console.log("[schedule] Scheduler disabled by SCHEDULE_AUTO_ENABLED=false");
+    return;
+  }
+
+  const timezone = String(
+    process.env.SCHEDULE_TIMEZONE ||
+      process.env.ROADMAP_TIMEZONE ||
+      "Asia/Ho_Chi_Minh",
+  ).trim();
+  const cronExpr = String(process.env.SCHEDULE_POLL_CRON || "*/1 * * * *").trim();
+
+  cron.schedule(
+    cronExpr,
+    async () => {
+      await runScheduledPostQueueFlow("cron");
+    },
+    { timezone },
+  );
+
+  console.log(`[schedule] Scheduler enabled: "${cronExpr}" (${timezone})`);
+}
+
 function initRoadmapScheduler() {
   const enabled = parseBoolean(process.env.ROADMAP_AUTO_ENABLED, true);
   if (!enabled) {
@@ -2339,9 +2398,13 @@ bot.help((ctx) => {
       "- /post <chủ đề>: Viết bài chia sẻ/góc nhìn và tạo bản thảo để duyệt.\n" +
       "- /news <chủ đề>: Viết bản tin công nghệ và tạo bản thảo để duyệt.\n" +
       "- /publish <nội dung>: Đăng ngay lên Facebook; có thể gửi kèm ảnh bằng caption /publish ...\n" +
+      "- /schedule <dd/mm/yyyy hh:mm | nội dung>: Lên lịch đăng; hỗ trợ cả ảnh + caption.\n" +
       "- /rewrite <nội dung thô>: Viết lại nội dung bạn đưa theo văn phong đã cấu hình.\n" +
       "- /edit_cancel: Hủy phiên chỉnh sửa bản thảo đang chờ feedback.\n" +
       "- /delete <post_id>: Xóa bài đã đăng trên Facebook.\n\n" +
+      "1.1) Quản lý lịch đăng\n" +
+      "- /schedule_list [status]: Xem lịch đăng theo trạng thái (pending/posted/failed/cancelled/all).\n" +
+      "- /schedule_delete <schedule_id>: Hủy 1 lịch đăng chưa lên sóng.\n\n" +
       "2) Quản lý roadmap\n" +
       "- /roadmap <chủ đề lớn>: Tạo đề xuất roadmap tổng quát.\n" +
       "- /roadmap_study <chủ đề>: Tạo đề xuất chỉ gồm bài học (study).\n" +
@@ -2360,7 +2423,7 @@ bot.help((ctx) => {
       "- /roadmap_regen: Hủy bản nháp roadmap hiện tại và tạo lại.\n\n" +
       "3) Storage\n" +
       "- /storage_info: Xem storage đang dùng (postgres/file) + số liệu hiện tại.\n" +
-      "- /storage_clear confirm: Xóa toàn bộ dữ liệu lưu trữ (roadmap + draft).",
+      "- /storage_clear confirm: Xóa toàn bộ dữ liệu lưu trữ (roadmap + draft + schedule).",
   );
 });
 
@@ -2382,6 +2445,34 @@ bot.command("publish", async (ctx) => {
     return;
   }
   await commandService.publish(ctx, { chatId: String(ctx.chat.id) });
+});
+
+bot.command("schedule", async (ctx) => {
+  markCommandHandled(ctx);
+  if (String(ctx.chat.id) !== ownerChatId()) {
+    return;
+  }
+  await commandService.schedule(ctx, { chatId: String(ctx.chat.id) });
+});
+
+bot.command("schedule_list", async (ctx) => {
+  markCommandHandled(ctx);
+  if (String(ctx.chat.id) !== ownerChatId()) {
+    return;
+  }
+  const text = String(ctx.message?.text || "").trim();
+  const status = text.replace(/^\/schedule_list(?:@\w+)?\s*/i, "").trim();
+  await commandService.scheduleList(ctx, status);
+});
+
+bot.command("schedule_delete", async (ctx) => {
+  markCommandHandled(ctx);
+  if (String(ctx.chat.id) !== ownerChatId()) {
+    return;
+  }
+  const text = String(ctx.message?.text || "").trim();
+  const scheduleId = text.replace(/^\/schedule_delete(?:@\w+)?\s*/i, "").trim();
+  await commandService.scheduleDelete(ctx, scheduleId);
 });
 
 bot.command("edit_cancel", async (ctx) => {
@@ -2585,7 +2676,7 @@ bot.on("text", async (ctx) => {
 
   // Chặn xử lý trùng cho các command đã có bot.command riêng.
   if (
-    /^\/(?:start|help|delete|rewrite|publish|edit_cancel|storage_clear|storage_info|roadmap(?:_study|_talk|_summary|_next|_regen|_save|_discard|_list|_approve_all|_approve|_edit|_type|_delete|_clear)?)(?:@\w+)?\b/i.test(
+    /^\/(?:start|help|delete|rewrite|publish|schedule(?:_list|_delete)?|edit_cancel|storage_clear|storage_info|roadmap(?:_study|_talk|_summary|_next|_regen|_save|_discard|_list|_approve_all|_approve|_edit|_type|_delete|_clear)?)(?:@\w+)?\b/i.test(
       userText,
     )
   ) {
@@ -2747,6 +2838,10 @@ bot.on("photo", async (ctx) => {
     return;
   }
 
+  if (await commandService.schedule(ctx, { chatId })) {
+    return;
+  }
+
   if (extractPublishContent(ctx.message) === null) {
     return;
   }
@@ -2757,6 +2852,10 @@ bot.on("photo", async (ctx) => {
 bot.on("document", async (ctx) => {
   const chatId = String(ctx.chat.id);
   if (chatId !== ownerChatId()) {
+    return;
+  }
+
+  if (await commandService.schedule(ctx, { chatId })) {
     return;
   }
 
@@ -2984,6 +3083,38 @@ async function handleDeletePublishedPostAction(ctx, postId = "") {
   }
 }
 
+async function handleCancelScheduledPostAction(ctx, scheduleId = "") {
+  const chatId = String(ctx.chat?.id || "");
+
+  if (chatId !== ownerChatId()) {
+    await ctx.answerCbQuery("Bạn không có quyền này.", { show_alert: true });
+    return;
+  }
+
+  const normalizedScheduleId = String(scheduleId || "").trim();
+  if (!normalizedScheduleId) {
+    await ctx.answerCbQuery("Thiếu ID lịch.", { show_alert: true });
+    return;
+  }
+
+  await ctx.answerCbQuery("Đang hủy lịch...");
+  const cancelled = await commandService.scheduleDelete(ctx, normalizedScheduleId, {
+    silentSuccess: true,
+    silentIfCancelled: true,
+  });
+  if (!cancelled) {
+    return;
+  }
+
+  try {
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+  } catch (editError) {
+    console.log("[bot] Could not clear scheduled keyboard:", editError.message);
+  }
+
+  await ctx.reply(`Đã hủy lịch ${normalizedScheduleId}.`);
+}
+
 bot.action(/^regen_image:(.+)$/, async (ctx) => {
   const draftId = String(ctx.match?.[1] || "").trim();
   await handleRegenImageAction(ctx, draftId);
@@ -3009,6 +3140,11 @@ bot.action(/^delete_published:(.+)$/, async (ctx) => {
   await handleDeletePublishedPostAction(ctx, postId);
 });
 
+bot.action(/^cancel_scheduled:(.+)$/, async (ctx) => {
+  const scheduleId = String(ctx.match?.[1] || "").trim();
+  await handleCancelScheduledPostAction(ctx, scheduleId);
+});
+
 // Backward-compatible handlers for old messages without draftId in callback_data.
 bot.action("regen_image", async (ctx) => {
   await handleRegenImageAction(ctx, "");
@@ -3026,6 +3162,7 @@ bot.action("cancel_post", async (ctx) => {
   await handleCancelPostAction(ctx, "");
 });
 
+initScheduledPostScheduler();
 initRoadmapScheduler();
 
 bot.launch().then(() => {

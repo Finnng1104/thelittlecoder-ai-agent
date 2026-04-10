@@ -1,6 +1,11 @@
 const { runManualPostFlow } = require("./post.service");
 const { runManualNewsFlow } = require("./news.service");
 const { runDirectPublishFlow } = require("./publish.service");
+const {
+  runScheduleDeleteFlow,
+  runScheduleListFlow,
+  runSchedulePostFlow,
+} = require("./schedule.service");
 
 function createCommandService(dependencies = {}) {
   const updateStatus = dependencies.updateStatus;
@@ -46,6 +51,20 @@ function createCommandService(dependencies = {}) {
         updateStatus,
         rememberPublishedPost,
       });
+    },
+
+    async schedule(ctx, options = {}) {
+      return runSchedulePostFlow(ctx, {
+        chatId: String(options.chatId || ctx?.chat?.id || ""),
+      });
+    },
+
+    async scheduleList(ctx, status = "") {
+      return runScheduleListFlow(ctx, status);
+    },
+
+    async scheduleDelete(ctx, scheduleId, options = {}) {
+      return runScheduleDeleteFlow(ctx, scheduleId, options);
     },
   };
 }
