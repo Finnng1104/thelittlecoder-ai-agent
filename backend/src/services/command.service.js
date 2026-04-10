@@ -1,11 +1,13 @@
 const { runManualPostFlow } = require("./post.service");
 const { runManualNewsFlow } = require("./news.service");
+const { runDirectPublishFlow } = require("./publish.service");
 
 function createCommandService(dependencies = {}) {
   const updateStatus = dependencies.updateStatus;
   const storeDraft = dependencies.storeDraft;
   const sendDraftPreview = dependencies.sendDraftPreview;
   const buildPostDraftOptions = dependencies.buildPostDraftOptions;
+  const rememberPublishedPost = dependencies.rememberPublishedPost;
 
   return {
     async post(ctx, topic, options = {}) {
@@ -35,6 +37,14 @@ function createCommandService(dependencies = {}) {
         storeDraft,
         sendDraftPreview,
         buildDraftOptions: draftOptions,
+      });
+    },
+
+    async publish(ctx, options = {}) {
+      return runDirectPublishFlow(ctx, {
+        chatId: String(options.chatId || ctx?.chat?.id || ""),
+        updateStatus,
+        rememberPublishedPost,
       });
     },
   };

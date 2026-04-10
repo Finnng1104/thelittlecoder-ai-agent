@@ -48,6 +48,11 @@ const {
 } = require("./src/services/db.service");
 const { buildDraftFromTopic } = require("./src/services/draft-builder.service");
 const { createCommandService } = require("./src/services/command.service");
+const {
+  buildDeletePostKeyboard,
+  extractPublishContent,
+  hasPublishableImage,
+} = require("./src/services/publish.service");
 
 function firstNonEmpty(...values) {
   for (const value of values) {
@@ -905,6 +910,7 @@ const commandService = createCommandService({
   storeDraft,
   sendDraftPreview,
   buildPostDraftOptions,
+  rememberPublishedPost,
 });
 
 function parseRoadmapOutput(rawText, sourceTopic) {
@@ -1327,7 +1333,7 @@ async function updateStatus(ctx, statusMessage, text) {
 async function runDeletePostFlow(ctx, inputPostId = "") {
   const chatId = String(ctx.chat.id);
   if (chatId !== ownerChatId()) {
-    return;
+    return false;
   }
 
   const explicitId = String(inputPostId || "").trim();
@@ -1337,7 +1343,7 @@ async function runDeletePostFlow(ctx, inputPostId = "") {
     await ctx.reply(
       "Chưa có ID để xóa. Dùng: /delete <post_id> hoặc đăng bài mới rồi /delete.",
     );
-    return;
+    return false;
   }
 
   const statusMsg = await ctx.reply(
@@ -1351,8 +1357,10 @@ async function runDeletePostFlow(ctx, inputPostId = "") {
       statusMsg,
       "Đã xóa bài viết thành công khỏi Fanpage.",
     );
+    return true;
   } catch (error) {
     await updateStatus(ctx, statusMsg, `Xóa thất bại: ${error.message}`);
+    return false;
   }
 }
 
@@ -2330,6 +2338,7 @@ bot.help((ctx) => {
       "1) Tạo bài nhanh\n" +
       "- /post <chủ đề>: Viết bài chia sẻ/góc nhìn và tạo bản thảo để duyệt.\n" +
       "- /news <chủ đề>: Viết bản tin công nghệ và tạo bản thảo để duyệt.\n" +
+      "- /publish <nội dung>: Đăng ngay lên Facebook; có thể gửi kèm ảnh bằng caption /publish ...\n" +
       "- /rewrite <nội dung thô>: Viết lại nội dung bạn đưa theo văn phong đã cấu hình.\n" +
       "- /edit_cancel: Hủy phiên chỉnh sửa bản thảo đang chờ feedback.\n" +
       "- /delete <post_id>: Xóa bài đã đăng trên Facebook.\n\n" +
@@ -2365,6 +2374,14 @@ bot.command("rewrite", async (ctx) => {
   markCommandHandled(ctx);
   const rawContent = extractRewriteInput(ctx.message?.text || "");
   await runRewriteFlow(ctx, rawContent || "");
+});
+
+bot.command("publish", async (ctx) => {
+  markCommandHandled(ctx);
+  if (String(ctx.chat.id) !== ownerChatId()) {
+    return;
+  }
+  await commandService.publish(ctx, { chatId: String(ctx.chat.id) });
 });
 
 bot.command("edit_cancel", async (ctx) => {
@@ -2568,7 +2585,7 @@ bot.on("text", async (ctx) => {
 
   // Chặn xử lý trùng cho các command đã có bot.command riêng.
   if (
-    /^\/(?:start|help|delete|rewrite|edit_cancel|storage_clear|storage_info|roadmap(?:_study|_talk|_summary|_next|_regen|_save|_discard|_list|_approve_all|_approve|_edit|_type|_delete|_clear)?)(?:@\w+)?\b/i.test(
+    /^\/(?:start|help|delete|rewrite|publish|edit_cancel|storage_clear|storage_info|roadmap(?:_study|_talk|_summary|_next|_regen|_save|_discard|_list|_approve_all|_approve|_edit|_type|_delete|_clear)?)(?:@\w+)?\b/i.test(
       userText,
     )
   ) {
@@ -2724,6 +2741,39 @@ bot.on("text", async (ctx) => {
   await safeReplyLongText(ctx, aiAnswer);
 });
 
+bot.on("photo", async (ctx) => {
+  const chatId = String(ctx.chat.id);
+  if (chatId !== ownerChatId()) {
+    return;
+  }
+
+  if (extractPublishContent(ctx.message) === null) {
+    return;
+  }
+
+  await commandService.publish(ctx, { chatId });
+});
+
+bot.on("document", async (ctx) => {
+  const chatId = String(ctx.chat.id);
+  if (chatId !== ownerChatId()) {
+    return;
+  }
+
+  if (extractPublishContent(ctx.message) === null) {
+    return;
+  }
+
+  if (!hasPublishableImage(ctx.message)) {
+    await ctx.reply("`/publish` chỉ nhận ảnh hoặc text. File đính kèm này không phải ảnh.", {
+      parse_mode: "Markdown",
+    });
+    return;
+  }
+
+  await commandService.publish(ctx, { chatId });
+});
+
 bot.catch(async (error, ctx) => {
   console.error("[bot] Unhandled middleware error:", error);
   try {
@@ -2866,7 +2916,10 @@ async function handleConfirmPostAction(ctx, draftId = "") {
         `ID bài viết: \`${fbPostId}\`\n\n` +
         `Nếu muốn xóa bài này, gõ:\n` +
         `\`/delete ${fbPostId}\``,
-      { parse_mode: "Markdown" },
+      {
+        parse_mode: "Markdown",
+        ...buildDeletePostKeyboard(fbPostId),
+      },
     );
   } catch (error) {
     await ctx.reply(`Đăng bài thất bại: ${error.message}`);
@@ -2904,6 +2957,33 @@ async function handleCancelPostAction(ctx, draftId = "") {
   await ctx.reply("Đã bỏ qua bản thảo hiện tại.");
 }
 
+async function handleDeletePublishedPostAction(ctx, postId = "") {
+  const chatId = String(ctx.chat?.id || "");
+
+  if (chatId !== ownerChatId()) {
+    await ctx.answerCbQuery("Bạn không có quyền này.", { show_alert: true });
+    return;
+  }
+
+  const normalizedPostId = String(postId || "").trim();
+  if (!normalizedPostId) {
+    await ctx.answerCbQuery("Thiếu ID bài viết.", { show_alert: true });
+    return;
+  }
+
+  await ctx.answerCbQuery("Đang xóa bài...");
+  const deleted = await runDeletePostFlow(ctx, normalizedPostId);
+  if (!deleted) {
+    return;
+  }
+
+  try {
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+  } catch (editError) {
+    console.log("[bot] Could not clear delete keyboard:", editError.message);
+  }
+}
+
 bot.action(/^regen_image:(.+)$/, async (ctx) => {
   const draftId = String(ctx.match?.[1] || "").trim();
   await handleRegenImageAction(ctx, draftId);
@@ -2922,6 +3002,11 @@ bot.action(/^confirm_post:(.+)$/, async (ctx) => {
 bot.action(/^cancel_post:(.+)$/, async (ctx) => {
   const draftId = String(ctx.match?.[1] || "").trim();
   await handleCancelPostAction(ctx, draftId);
+});
+
+bot.action(/^delete_published:(.+)$/, async (ctx) => {
+  const postId = String(ctx.match?.[1] || "").trim();
+  await handleDeletePublishedPostAction(ctx, postId);
 });
 
 // Backward-compatible handlers for old messages without draftId in callback_data.
