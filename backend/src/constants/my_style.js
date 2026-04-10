@@ -58,24 +58,6 @@ Vậy nên, ở đây sẽ không có những giáo điều sáo rỗng. Chỉ c
 Cảm ơn bạn đã ở đây và lắng nghe chút tâm sự đầu tuần của mình. Nếu bạn cũng đang chần chừ làm một điều gì đó vì sợ mình "chưa đủ giỏi", thì hãy cứ làm đi. Start Little, Dream Big! 🌱
 Chúc anh em một tuần mới code mượt, ít bug và nhiều năng lượng nhé! 💪
 #TheLittleCoder #TheLittleCoder_Story #ChuyenNghe
-
-BÀI MẪU 3:
-Mình đã mất oan 3 tháng cuộc đời chỉ để nhận ra: Việc gật gù trước video hướng dẫn KHÔNG biến mình thành lập trình viên. 🤯
-Có ai ở đây từng rơi vào vòng lặp này chưa? 
-1️⃣ Xem video hướng dẫn trên Youtube/Udemy: "À, hiểu rồi, dễ mà!" 😌 
-2️⃣ Tắt video đi, mở VS Code lên tự làm. 
-3️⃣ Đầu óc trống rỗng, không biết gõ dòng đầu tiên là gì. 😶
-Chúc mừng, bạn đã lọt vào "Tutorial Hell".
-Hồi mới học, mình bị kẹt ở đây suốt thời gian dài. Cảm giác học rất nhiều nhưng thực tế trình độ vẫn dậm chân tại chỗ. Lý do đơn giản lắm: Mình chỉ đang "copy tư duy" của người khác chứ không phải tư duy của mình.
-Sau này mình nhận ra, cách duy nhất để thoát khỏi nó là ĐẬP ĐI LÀM LẠI.
-Đây là quy trình "cai nghiện" tutorial của mình: 
-✅ Bước 1: Xem video một lượt để hiểu logic (Tuyệt đối không code theo). 
-✅ Bước 2: Code lại theo trí nhớ. Quên chỗ nào? Search Google chỗ đó (Đừng mở lại video vội). 
-✅ Bước 3 (Quan trọng nhất): Phá code. Thử đổi màu, đổi text, thêm một tính năng nhỏ không có trong bài. Ví dụ thầy dạy làm nút bấm màu xanh, mình thử làm nó màu đỏ và khi hover vào thì to lên.
-Chỉ khi bạn tự tay sửa và làm hỏng code, bạn mới thực sự hiểu nó chạy thế nào.
-Đừng biến mình thành "Thợ gõ code", hãy làm "Lập trình viên".
-Anh em nào đang kẹt trong cái "địa ngục" này thì điểm danh cái nào! 👇
-#TheLittleCoder #Tips #TutorialHell
 `;
 
 module.exports = { MY_PAST_POSTS };

@@ -3,6 +3,7 @@ const {
   DEEP_RESEARCH_PROMPT,
   NEWS_ENGINE_PROMPT,
   SERIES_POST_PROMPT,
+  resolveContentWriterRequestOptions,
 } = require("./ai.service");
 const { researchToday } = require("./search.service");
 const { buildImagePromptPackage, generateImageAsset } = require("./image.service");
@@ -11,11 +12,7 @@ const { formatForFacebook } = require("../utils/textFormatter");
 async function noop() {}
 
 function resolveTextModel() {
-  return (
-    process.env.AI_MODEL ||
-    process.env.OPENROUTER_DEEP_MODEL ||
-    process.env.OPENROUTER_MODEL
-  );
+  return resolveContentWriterRequestOptions().model;
 }
 
 function normalizePostIntent(value, fallback = "insight") {
@@ -70,7 +67,9 @@ async function buildDraftFromTopic(topic, options = {}) {
   const currentDate = new Date().toLocaleDateString("vi-VN", {
     timeZone: timezone || "Asia/Ho_Chi_Minh",
   });
-  const textModel = options.model || resolveTextModel();
+  const textModelOptions = resolveContentWriterRequestOptions({
+    model: options.model || resolveTextModel(),
+  });
 
   await onStep(1, `[1/5] Đang research thông tin mới nhất về: ${topic}...`);
   const research = await researchToday(topic, {
@@ -117,7 +116,7 @@ async function buildDraftFromTopic(topic, options = {}) {
         : postIntent === "news"
           ? NEWS_ENGINE_PROMPT
           : DEEP_RESEARCH_PROMPT,
-      model: textModel,
+      ...textModelOptions,
       expectJson: true,
       temperature: isSeries ? 0.25 : 0.35,
       timeout: 300000,
@@ -140,7 +139,7 @@ async function buildDraftFromTopic(topic, options = {}) {
         : postIntent === "news"
           ? NEWS_ENGINE_PROMPT
           : DEEP_RESEARCH_PROMPT,
-      model: textModel,
+      ...textModelOptions,
       expectJson: true,
       temperature: isSeries ? 0.2 : 0.3,
       timeout: 300000,

@@ -8,6 +8,7 @@ const {
   REFINE_CONTENT_PROMPT,
   ROADMAP_GENERATOR_PROMPT,
   SERIES_POST_PROMPT,
+  resolveContentWriterRequestOptions,
 } = require("./src/services/ai.service");
 const {
   buildImagePromptPackage,
@@ -1473,10 +1474,7 @@ async function runDraftEditFeedbackFlow(ctx, feedbackText) {
 
     const structuredRaw = await askAI(editPrompt, {
       systemPrompt: isSeries ? SERIES_POST_PROMPT : REFINE_CONTENT_PROMPT,
-      model:
-        process.env.AI_MODEL ||
-        process.env.OPENROUTER_DEEP_MODEL ||
-        process.env.OPENROUTER_MODEL,
+      ...resolveContentWriterRequestOptions(),
       expectJson: true,
       temperature: 0.3,
       timeout: 300000,
@@ -1567,10 +1565,7 @@ async function runRewriteFlow(ctx, rawContent) {
         "Hãy giữ nguyên ý chính, chỉ chỉnh sửa ngôn từ và trả về JSON đúng schema.",
       {
         systemPrompt: REFINE_CONTENT_PROMPT,
-        model:
-          process.env.AI_MODEL ||
-          process.env.OPENROUTER_DEEP_MODEL ||
-          process.env.OPENROUTER_MODEL,
+        ...resolveContentWriterRequestOptions(),
         expectJson: true,
         temperature: 0.4,
         timeout: 300000,

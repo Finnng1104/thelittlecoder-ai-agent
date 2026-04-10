@@ -3,6 +3,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { MY_PAST_POSTS } = require("../constants/my_style");
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const DEFAULT_SHOPAIKEY_BASE_URL = "https://api.shopaikey.com/v1";
 const FALLBACK_MODEL = "openrouter/auto";
 const OPENROUTER_DEFAULT_MODEL = "deepseek/deepseek-r1";
 const OPENROUTER_RETRY_MODELS = [
@@ -88,26 +89,34 @@ NHIỆM VỤ:
 const NEWS_ENGINE_PROMPT = `
 ${THE_LITTLE_CODER_ENGINE_V2_JSON}
 
-[NEWS MODE - AI & MARKET INTELLIGENCE]
-Nhiệm vụ: Cập nhật biến động IT thị trường và các bước tiến AI trong 7 ngày qua.
+[NEWS MODE - AI & MARKET INTELLIGENCE - V5.3]
+Nhiệm vụ: Cập nhật biến động IT và AI trong 7 ngày qua kèm TRÍCH DẪN và ICON NGỮ CẢNH.
+
+[ICON STRATEGY - BẮT BUỘC TỰ CHỌN]
+Dựa vào nội dung tin, hãy tự chọn 1 icon phù hợp nhất để đặt ở đầu mỗi tiêu đề tin:
+- 🤖 AI/LLM: Cho tin về model mới (Claude, GPT, Sora), AI tools, coding agents.
+- 📉 LAYOFFS: Cho tin sa thải, cắt giảm nhân sự, biến động kinh tế.
+- 🚀 TECH UPDATE: Cho tin framework ra version mới, thư viện hot, cập nhật IDE.
+- 🛡️ SECURITY: Cho tin về lỗ hổng Zero-day, bảo mật, scam trong ngành.
+- 💸 FUNDING/MARKET: Cho tin về gọi vốn, mua lại công ty (M&A).
 
 [STRICT CONTENT RULES]
-1. ƯU TIÊN AI-FIRST: Nếu có model AI mới (LLM, Video Gen, Coding Agent) hoặc tính năng mới của Cursor/Copilot/Claude -> ĐƯA LÊN ĐẦU.
-2. THỊ TRƯỜNG IT: Cập nhật tình hình layoff, gọi vốn (funding), hoặc các mảng đang "khát" nhân sự (vd: AI Engineer, Rust Dev).
-3. FACT & NUMBERS: Phải có tên Model, thông số hiệu năng, hoặc con số thiệt hại/sa thải cụ thể.
-4. LOẠI BỎ TIN RÁC: Không đưa tin về các sự kiện công nghệ chung chung (triển lãm, ra mắt điện thoại...). Chỉ tập trung vào cái Dev cần dùng.
+1. TRÍCH DẪN BẮT BUỘC: Mỗi điểm tin PHẢI đi kèm ít nhất 1 link nguồn từ dữ liệu research.
+   - Format: 🔗 [Nguồn: tên_trang - link]
+2. FACT & NUMBERS: Phải có con số cụ thể (Số người sa thải, % benchmark, số hiệu version). Tuyệt đối không viết chung chung.
+3. ZERO HALLUCINATION: Chỉ dùng tin tức và link có thực trong dữ liệu research.
+4. KHÔNG SÁO RỖNG: Loại bỏ mọi văn mẫu "anh em ơi ngồi yên vị chưa", đi thẳng vào tin.
 
 [STRUCTURE]
-1. HOOK: "XÁT MUỐI" về sự lỗi thời nếu không cập nhật tin hot nhất tuần qua.
-2. BODY: 3 điểm tin chính. Ưu tiên:
-   - [AI BREAKTHROUGH]: Tính năng/Model mới nhất.
-   - [IT MARKET SHIFT]: Layoffs, xu hướng tuyển dụng.
-   - [DEV UPDATES]: Tooling, Library, Security.
-3. KẾT: Một câu hỏi về tech-stack để anh em "show hàng" hoặc tranh luận.
+1. HOOK: Viết hoa toàn bộ một sự kiện chấn động nhất kèm icon 🚨 hoặc 🔥.
+2. BODY: 2 điểm tin chính. Định dạng mỗi điểm:
+   - [Icon từ bộ STRATEGY] [TÊN SỰ KIỆN - VIẾT HOA]: Tóm tắt tin gọn, gắt.
+   - 💡 Insight: Phân tích thực dụng (Tiết kiệm thời gian X, tránh rủi ro Y, mảng Z bão hòa).
+   - 🔗 [Nguồn: tên_trang - link]
+3. KẾT: Một câu hỏi gắt xoáy vào thực tế của anh em.
 
-[INSIGHT QUALITY]
-- Tuyệt đối không viết Insight kiểu "hãy học đi". 
-- Insight phải là: "Dùng cái này để giảm 50% thời gian code X" hoặc "Tin này báo hiệu mảng Y sắp bão hòa".
+[OUTPUT]
+Trả về JSON đúng schema. Link và Icon phải nằm trong "post_content".
 `.trim();
 
 const REFINE_CONTENT_PROMPT = `
@@ -265,6 +274,42 @@ function normalizeOpenRouterModel(modelId) {
   }
 
   return raw;
+}
+
+function resolveContentWriterModel() {
+  return normalizeOpenRouterModel(
+    process.env.CONTENT_WRITER_MODEL ||
+      process.env.POST_WRITER_MODEL ||
+      process.env.AI_MODEL ||
+      process.env.OPENROUTER_DEEP_MODEL ||
+      process.env.OPENROUTER_MODEL ||
+      OPENROUTER_DEFAULT_MODEL,
+  );
+}
+
+function resolveContentWriterProvider(modelId = resolveContentWriterModel()) {
+  const explicitProvider = String(process.env.CONTENT_WRITER_PROVIDER || "")
+    .trim()
+    .toLowerCase();
+  if (["openrouter", "shopaikey"].includes(explicitProvider)) {
+    return explicitProvider;
+  }
+
+  return /\bclaude\b/i.test(String(modelId || "").trim())
+    ? "shopaikey"
+    : "openrouter";
+}
+
+function resolveContentWriterRequestOptions(options = {}) {
+  const model = normalizeOpenRouterModel(
+    options.model || resolveContentWriterModel(),
+  );
+
+  return {
+    ...options,
+    model,
+    provider: options.provider || resolveContentWriterProvider(model),
+  };
 }
 
 function isFreeModel(modelId) {
@@ -452,122 +497,183 @@ function buildRequestPayload(
     payload.max_tokens = Math.floor(maxTokens);
   }
 
-  const transforms =
-    options.transforms || process.env.OPENROUTER_TRANSFORMS || "middleman";
-  const transformList = String(transforms)
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
-  if (transformList.length > 0) {
-    payload.transforms = transformList;
+  if (options.includeTransforms !== false) {
+    const transforms =
+      options.transforms || process.env.OPENROUTER_TRANSFORMS || "middleman";
+    const transformList = String(transforms)
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+    if (transformList.length > 0) {
+      payload.transforms = transformList;
+    }
   }
 
   return payload;
 }
 
-async function askAI(question, options = {}) {
-  try {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) throw new Error("Missing OPENROUTER_API_KEY");
+function normalizeAIContent(rawContent, systemPrompt, options = {}) {
+  let content = String(rawContent || "").trim();
+  if (!content) {
+    return "Tôi chưa có câu trả lời phù hợp.";
+  }
 
-    const configuredModel =
-      process.env.AI_MODEL ||
-      process.env.OPENROUTER_MODEL ||
-      OPENROUTER_DEFAULT_MODEL;
-    const model = normalizeOpenRouterModel(options.model || configuredModel);
-    const systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
-    const temperature = options.temperature ?? 0.6;
-    const timeout = options.timeout ?? 300000;
-    const modelQueue = buildModelQueue(model, options);
-    const siteUrl =
-      process.env.OPENROUTER_SITE_URL || "https://thelittlecoder.com";
-    const appName = process.env.OPENROUTER_APP_NAME || "The Little Coder Bot";
+  // Dọn <think> của một số model để output sạch.
+  content = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
-    const requestConfig = {
+  const shouldExtractJson =
+    options.expectJson === true ||
+    /\bOUTPUT FORMAT\b|\bJSON\b/i.test(String(systemPrompt || ""));
+  if (shouldExtractJson) {
+    content = tryExtractJsonOnlyContent(content);
+  }
+
+  return content || "Tôi chưa có câu trả lời phù hợp.";
+}
+
+async function askAIThroughOpenRouter(question, options = {}) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("Missing OPENROUTER_API_KEY");
+
+  const configuredModel =
+    process.env.AI_MODEL ||
+    process.env.OPENROUTER_MODEL ||
+    OPENROUTER_DEFAULT_MODEL;
+  const model = normalizeOpenRouterModel(options.model || configuredModel);
+  const systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  const temperature = options.temperature ?? 0.6;
+  const timeout = options.timeout ?? 300000;
+  const modelQueue = buildModelQueue(model, options);
+  const siteUrl =
+    process.env.OPENROUTER_SITE_URL || "https://thelittlecoder.com";
+  const appName = process.env.OPENROUTER_APP_NAME || "The Little Coder Bot";
+
+  const requestConfig = {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": siteUrl,
+      "X-Title": appName,
+    },
+    timeout,
+  };
+
+  let response = null;
+  let lastError = null;
+
+  for (const candidateModel of modelQueue) {
+    try {
+      response = await axios.post(
+        OPENROUTER_URL,
+        buildRequestPayload(
+          candidateModel,
+          question,
+          systemPrompt,
+          temperature,
+          options,
+        ),
+        requestConfig,
+      );
+      break;
+    } catch (error) {
+      lastError = error;
+      const transformMessage = String(
+        error?.response?.data?.error?.message || "",
+      ).toLowerCase();
+      const transformFailed = transformMessage.includes("transform");
+      if (transformFailed) {
+        try {
+          response = await axios.post(
+            OPENROUTER_URL,
+            buildRequestPayload(
+              candidateModel,
+              question,
+              systemPrompt,
+              temperature,
+              {
+                ...options,
+                transforms: "",
+              },
+            ),
+            requestConfig,
+          );
+          break;
+        } catch (retryError) {
+          lastError = retryError;
+        }
+      }
+
+      if (!shouldRetryWithAnotherModel(error)) {
+        throw error;
+      }
+
+      console.warn(
+        `[ai.service] Model "${candidateModel}" unavailable, retrying with another provider/model...`,
+      );
+    }
+  }
+
+  if (!response) {
+    throw lastError || new Error("OpenRouter request failed without response");
+  }
+
+  return {
+    content: response.data.choices?.[0]?.message?.content || "",
+    systemPrompt,
+  };
+}
+
+async function askAIThroughShopAIKey(question, options = {}) {
+  const apiKey = options.apiKey || process.env.SHOPAIKEY_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing SHOPAIKEY_API_KEY");
+  }
+
+  const systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  const model = String(options.model || resolveContentWriterModel()).trim();
+  const temperature = options.temperature ?? 0.6;
+  const timeout = options.timeout ?? 300000;
+  const baseUrl = String(
+    options.baseUrl ||
+      process.env.SHOPAIKEY_BASE_URL ||
+      DEFAULT_SHOPAIKEY_BASE_URL,
+  )
+    .trim()
+    .replace(/\/+$/, "");
+
+  const response = await axios.post(
+    `${baseUrl}/chat/completions`,
+    buildRequestPayload(model, question, systemPrompt, temperature, {
+      ...options,
+      includeTransforms: false,
+    }),
+    {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": siteUrl,
-        "X-Title": appName,
       },
       timeout,
-    };
+    },
+  );
 
-    let response = null;
-    let lastError = null;
+  return {
+    content: response.data.choices?.[0]?.message?.content || "",
+    systemPrompt,
+  };
+}
 
-    for (const candidateModel of modelQueue) {
-      try {
-        response = await axios.post(
-          OPENROUTER_URL,
-          buildRequestPayload(
-            candidateModel,
-            question,
-            systemPrompt,
-            temperature,
-            options,
-          ),
-          requestConfig,
-        );
-        break;
-      } catch (error) {
-        lastError = error;
-        // Neu transform gây loi, thu lai khong transform 1 lan cho model hien tai.
-        const transformMessage = String(
-          error?.response?.data?.error?.message || "",
-        ).toLowerCase();
-        const transformFailed = transformMessage.includes("transform");
-        if (transformFailed) {
-          try {
-            response = await axios.post(
-              OPENROUTER_URL,
-              buildRequestPayload(
-                candidateModel,
-                question,
-                systemPrompt,
-                temperature,
-                {
-                  ...options,
-                  transforms: "",
-                },
-              ),
-              requestConfig,
-            );
-            break;
-          } catch (retryError) {
-            lastError = retryError;
-          }
-        }
+async function askAI(question, options = {}) {
+  const provider = String(options.provider || "openrouter")
+    .trim()
+    .toLowerCase();
 
-        if (!shouldRetryWithAnotherModel(error)) {
-          throw error;
-        }
+  try {
+    const response =
+      provider === "shopaikey"
+        ? await askAIThroughShopAIKey(question, options)
+        : await askAIThroughOpenRouter(question, options);
 
-        console.warn(
-          `[ai.service] Model "${candidateModel}" unavailable, retrying with another provider/model...`,
-        );
-      }
-    }
-
-    if (!response) {
-      throw (
-        lastError || new Error("OpenRouter request failed without response")
-      );
-    }
-
-    let content = response.data.choices?.[0]?.message?.content || "";
-
-    // MẸO: Loại bỏ đoạn "suy nghĩ" <think>...</think> của DeepSeek để bài viết sạch đẹp
-    content = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-
-    const shouldExtractJson =
-      options.expectJson === true ||
-      /\bOUTPUT FORMAT\b|\bJSON\b/i.test(String(systemPrompt || ""));
-    if (shouldExtractJson) {
-      content = tryExtractJsonOnlyContent(content);
-    }
-
-    return content || "Tôi chưa có câu trả lời phù hợp.";
+    return normalizeAIContent(response.content, response.systemPrompt, options);
   } catch (error) {
     const timeoutLike =
       error.code === "ECONNABORTED" ||
@@ -580,7 +686,10 @@ async function askAI(question, options = {}) {
         error.message ||
         "Loi goi AI khong xac dinh.";
 
-    console.error("[ai.service] Error:", error.response?.data || error.message);
+    console.error(
+      `[ai.service:${provider}] Error:`,
+      error.response?.data || error.message,
+    );
 
     if (options.throwOnError) {
       throw new Error(normalizedMessage);
@@ -635,4 +744,7 @@ module.exports = {
   ROADMAP_GENERATOR_PROMPT,
   SERIES_POST_PROMPT,
   getBetterImagePrompt,
+  resolveContentWriterModel,
+  resolveContentWriterProvider,
+  resolveContentWriterRequestOptions,
 };
