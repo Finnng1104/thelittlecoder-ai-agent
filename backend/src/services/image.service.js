@@ -8,6 +8,7 @@ const INLINE_FALLBACK_PNG_BASE64 =
 const DEFAULT_REFERENCE_IMAGE_RELATIVE_PATH = "assets/anh-mau.png";
 const DEFAULT_PANEL_MAIN_TEXT = "WHAT IS REACTJS";
 const FIXED_PANEL_SUBTEXT = "THE LITTLE CODER | JR FRONTEND DEV";
+const FIXED_LAPTOP_LID_TEXT = "THE LITTLE CODER";
 const FIXED_DESK_SIGN_TEXT = "THE LITTLE CODER";
 const VI_TO_EN_TOKEN_MAP = {
   tin: "NEWS",
@@ -68,7 +69,7 @@ function stripNoiseWords(topic) {
   return normalizeAscii(topic)
     .replace(
       /\b(post|chia se|hanh trinh|ve|viet bai|bai viet|share|story|journey)\b/gi,
-      " "
+      " ",
     )
     .replace(/\s+/g, " ")
     .trim();
@@ -76,20 +77,24 @@ function stripNoiseWords(topic) {
 
 function hasVietnameseDiacritics(text) {
   return /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(
-    String(text || "")
+    String(text || ""),
   );
 }
 
 function looksVietnameseByKeywords(text) {
   const normalized = ` ${toAsciiLower(text)} `;
   return /( tin tuc | cong nghe | lap trinh | huong dan | bai hoc | bai viet | tam su | hanh trinh | cho anh em | cho newbie )/.test(
-    normalized
+    normalized,
   );
 }
 
 function compactUpperTitle(tokens, maxWords = 8, maxLength = 72) {
   return tokens
-    .map((token) => String(token || "").trim().toUpperCase())
+    .map((token) =>
+      String(token || "")
+        .trim()
+        .toUpperCase(),
+    )
     .filter(Boolean)
     .slice(0, maxWords)
     .join(" ")
@@ -110,9 +115,9 @@ function getAntEmotionPrompt(emotion = "default") {
 
 function pickDeterministicPosition(topic) {
   const positions = [
-    "standing on the right side of the desk, facing the neon panel",
-    "standing on the left side of the desk, facing the neon panel",
-    "standing behind the laptop, facing the neon panel",
+    "sitting slightly angled toward the holographic panel, hands on keyboard, focused and calm",
+    "sitting upright behind the laptop, typing with attentive posture and steady focus",
+    "sitting comfortably at the desk, leaning in slightly while typing with creative concentration",
   ];
 
   const seed = String(topic || "")
@@ -138,7 +143,7 @@ function getAntSceneInstructions(topic) {
 
   if (
     /(bai 1|bài 1|moi bat dau|mới bắt đầu|newbie|co ban|cơ bản|tutorial|learn)/i.test(
-      rawTopic
+      rawTopic,
     )
   ) {
     return {
@@ -150,9 +155,14 @@ function getAntSceneInstructions(topic) {
     };
   }
 
-  if (/(nang cao|nâng cao|vuot qua|vượt qua|optimiz|performance|scale|production)/i.test(rawTopic)) {
+  if (
+    /(nang cao|nâng cao|vuot qua|vượt qua|optimiz|performance|scale|production)/i.test(
+      rawTopic,
+    )
+  ) {
     return {
-      antAction: "typing rapidly with confident posture, slightly leaning forward with energetic body language",
+      antAction:
+        "typing rapidly with confident posture, slightly leaning forward with energetic body language",
       consoleLog: `console.log("Feature completed: ${englishTopic}!");`,
       emotion: "happy",
       cleanTopic,
@@ -177,7 +187,8 @@ function buildEnglishTitleHint(topic) {
   }
 
   const asciiTokens = normalizeAscii(raw).split(/\s+/).filter(Boolean);
-  const containsVietnamese = hasVietnameseDiacritics(raw) || looksVietnameseByKeywords(raw);
+  const containsVietnamese =
+    hasVietnameseDiacritics(raw) || looksVietnameseByKeywords(raw);
 
   // Nếu đã là EN thì chỉ cần normalize nhẹ.
   if (!containsVietnamese) {
@@ -206,15 +217,70 @@ function resolveImageInput(input) {
       imageShortTitle: "",
       antAction: "",
       logMessage: "",
+      deskSignText: "",
     };
   }
 
   return {
     topic: String(input?.topic || input?.post_content || "").trim(),
-    imageShortTitle: String(input?.image_short_title || input?.imageShortTitle || "").trim(),
+    imageShortTitle: String(
+      input?.image_short_title || input?.imageShortTitle || "",
+    ).trim(),
     antAction: String(input?.ant_action || input?.antAction || "").trim(),
     logMessage: String(input?.log_message || input?.logMessage || "").trim(),
+    deskSignText: String(
+      input?.desk_sign_text || input?.deskSignText || "",
+    ).trim(),
   };
+}
+
+function buildDeskSignText(input = {}) {
+  const explicit = compactUpperTitle(
+    normalizeAscii(input.deskSignText).split(/\s+/).filter(Boolean),
+    4,
+    28,
+  );
+  if (explicit) {
+    return explicit;
+  }
+
+  const raw = toAsciiLower(
+    [input.topic, input.imageShortTitle].filter(Boolean).join(" "),
+  );
+
+  if (
+    /\b(back|comeback|restart|reboot|return|tro lai|quay lai|khoi dong lai)\b/i.test(
+      raw,
+    )
+  ) {
+    return "I'M BACK";
+  }
+
+  if (/\b(news|update|tin tuc|cap nhat|launch|release)\b/i.test(raw)) {
+    return "NEW DROP";
+  }
+
+  if (/\b(debug|bug|fix|loi)\b/i.test(raw)) {
+    return "FIX MODE";
+  }
+
+  if (/\b(guide|tutorial|huong dan|learn|study)\b/i.test(raw)) {
+    return "BUILD MODE";
+  }
+
+  if (/\b(insight|share|kinh nghiem|career|deep)\b/i.test(raw)) {
+    return "DEEP DIVE";
+  }
+
+  if (/\b(tip|trick|hack|meo|snippet)\b/i.test(raw)) {
+    return "QUICK HACK";
+  }
+
+  if (/\b(showcase|project|demo|build)\b/i.test(raw)) {
+    return "BUILT IT";
+  }
+
+  return FIXED_DESK_SIGN_TEXT;
 }
 
 function sanitizePanelMainText(value, fallback) {
@@ -232,7 +298,9 @@ function sanitizePanelMainText(value, fallback) {
 }
 
 function trimDisplayText(value, maxLength = 80) {
-  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  const normalized = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!normalized) {
     return "";
   }
@@ -287,36 +355,34 @@ function buildImagePrompt(topicOrPayload, emotion = "default") {
   const panelTitle = sanitizePanelMainText(input.imageShortTitle, hintTitle);
   const robotAction = input.antAction || scene.antAction;
   const logMessage = input.logMessage || scene.consoleLog;
+  const deskSignText = buildDeskSignText(input);
 
   return `
-A cinematic rendered image in tech-noir style.
-Use attached reference image composition and depth if available.
+(Cinematic rendered image in tech-noir style), use attached reference image composition and depth if available.
 
-Main character:
-- An adorable sleek mini robot mascot with large glowing blue eyes, compact rounded body, smooth glossy panels, elegant blue light seams.
-- Wearing a tiny black tech hoodie with a prominent glowing white React logo on the chest.
-- Dynamic action: ${robotAction}.
-- The robot is seated at a sleek matte black desk, focused on typing.
+The scene features an adorable sleek mini robot mascot with large glowing blue eyes, a compact rounded body, smooth glossy panels, and elegant blue light seams. The robot is wearing a tiny black tech hoodie with a prominent glowing white React logo on the chest. Dynamic action: ${robotAction}. The robot is seated at a sleek matte black desk, focused on typing on the laptop.
 
 Foreground and branding:
-- Laptop lid must show clear white uppercase text: "REACT JS".
-- On desk near foreground, add one miniature sign with clear uppercase text: "${FIXED_DESK_SIGN_TEXT}".
-- Keep only one visible headphone set on desk. No duplicate headphones.
+- Laptop lid must show clear white uppercase text: "${FIXED_LAPTOP_LID_TEXT}".
+- On the desk in the near foreground, place one miniature sign with clear, legible uppercase text: "${deskSignText}".
+- Keep only one visible headphone set on the desk area, with no duplicate headphones anywhere else.
 
 Floating holographic layer:
-- In front of the laptop, create one complex free-floating cyber holographic panel.
-- Panel main text must be clear uppercase ENGLISH only: "${panelTitle}".
+- In front of the laptop, create one complex free-floating cyber holographic panel with layered cinematic depth.
+- Panel main text must stay clear, legible, and uppercase: "${panelTitle}".
 - Panel secondary text must be fixed and clear: "${FIXED_PANEL_SUBTEXT}".
-- Add subtle white-blue floating code snippets around robot.
-- Keep text legible and unobstructed.
+- Add subtle glowing white-blue holographic code snippets surrounding the robot.
+- Keep the panel text unobstructed and easy to read.
 
-Environment:
-- Minimal futuristic creator studio, clean surfaces, premium dual monitors, blurred city night view.
-- Remove glowing wall sign entirely.
-- Color palette: crisp white glow, soft silver metallic tones, cool blue lighting, deep gray shadows.
-- Composition: rule of thirds, subject slightly off-center, layered cinematic depth.
-- Lens and render: wide-angle lens, shallow depth of field, sharp focus on robot + text panels, Unreal Engine 5 style.
-- No watermark, no corner logos.
+Environment and composition:
+- Color palette features crisp white glow, soft silver metallic tones, cool blue lighting, and deep gray shadows.
+- The room is a minimal futuristic creator studio with clean desk surfaces, premium dual monitors, soft indirect lighting, and a blurred city night view.
+- Remove the glowing wall sign entirely and avoid extra wall branding.
+- Composition follows the rule of thirds, with the main subject slightly off-center and the laptop plus character as the primary focal point.
+- Use a wide-angle lens, shallow depth of field, and sharp focus on the robot and text panels.
+- 3D rendered in Unreal Engine 5 style, premium, clean, cinematic, no watermark, no corner logos.
+
+Scene context:
 - Topic context: ${rawTopic}
 - Small debug vibe line for scene consistency: ${logMessage}
 - Mood tuning: ${getAntEmotionPrompt(sceneEmotion)}
@@ -337,7 +403,7 @@ function normalizeModelName(name) {
 
 function getImageModelCandidates() {
   const primary = normalizeModelName(
-    process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image"
+    process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image",
   );
   const extra = String(process.env.GEMINI_IMAGE_FALLBACK_MODELS || "")
     .split(",")
@@ -352,13 +418,14 @@ function getImageModelCandidates() {
       "gemini-3-pro-image-preview",
       "gemini-2.5-flash",
       ...extra,
-    ])
+    ]),
   );
 }
 
 function resolveReferenceImagePath() {
   const configured = String(
-    process.env.GEMINI_REFERENCE_IMAGE_PATH || DEFAULT_REFERENCE_IMAGE_RELATIVE_PATH
+    process.env.GEMINI_REFERENCE_IMAGE_PATH ||
+      DEFAULT_REFERENCE_IMAGE_RELATIVE_PATH,
   ).trim();
   if (!configured) {
     return "";
@@ -417,8 +484,14 @@ function extractImagePart(response) {
 }
 
 function buildFluxFallbackUrl(prompt, seed = null) {
-  const encoded = encodeURIComponent(String(prompt || "").replace(/\s+/g, " ").trim());
-  const value = Number.isInteger(seed) ? seed : Math.floor(Math.random() * 100000);
+  const encoded = encodeURIComponent(
+    String(prompt || "")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
+  const value = Number.isInteger(seed)
+    ? seed
+    : Math.floor(Math.random() * 100000);
   return `https://pollinations.ai/p/${encoded}?width=1280&height=720&model=flux&nologo=true&seed=${value}`;
 }
 
@@ -446,10 +519,12 @@ async function callGeminiForImage(prompt, options = {}) {
   const genAI = new GoogleGenerativeAI(apiKey);
   const models = getImageModelCandidates();
   const includeReferenceImage = Boolean(options.includeReferenceImage);
-  const referenceImagePart = includeReferenceImage ? getReferenceImagePart() : null;
+  const referenceImagePart = includeReferenceImage
+    ? getReferenceImagePart()
+    : null;
   if (includeReferenceImage && !referenceImagePart) {
     console.warn(
-      `[image.service] Reference image not found at "${resolveReferenceImagePath()}". Fallback to prompt-only mode.`
+      `[image.service] Reference image not found at "${resolveReferenceImagePath()}". Fallback to prompt-only mode.`,
     );
   }
 
@@ -457,7 +532,9 @@ async function callGeminiForImage(prompt, options = {}) {
   for (const modelName of models) {
     try {
       const model = genAI.getGenerativeModel({ model: modelName });
-      const requestPayload = referenceImagePart ? [referenceImagePart, { text: prompt }] : prompt;
+      const requestPayload = referenceImagePart
+        ? [referenceImagePart, { text: prompt }]
+        : prompt;
       const result = await model.generateContent(requestPayload);
       const response = await result.response;
       return { response, modelName };
@@ -506,14 +583,23 @@ async function generateImageAsset(topic, emotion = "default") {
 
     const text =
       response?.text?.() ||
-      response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join(" ") ||
+      response?.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text || "")
+        .join(" ") ||
       "";
     const url = extractUrlFromText(text);
     if (url) {
       try {
         const { buffer, mimeType } = await downloadImageBuffer(url, true);
         if (isTelegramSafePhotoMime(mimeType)) {
-          return { type: "buffer", buffer, mimeType, model: modelName, prompt, sourceUrl: url };
+          return {
+            type: "buffer",
+            buffer,
+            mimeType,
+            model: modelName,
+            prompt,
+            sourceUrl: url,
+          };
         }
         return { type: "url", url, model: modelName, prompt };
       } catch (_downloadError) {
@@ -540,7 +626,10 @@ async function generateImageAsset(topic, emotion = "default") {
       return getInlineFallbackAsset(prompt, "flux-download-failed");
     }
   } catch (error) {
-    console.error("[image.service] Google image generation error:", error.message);
+    console.error(
+      "[image.service] Google image generation error:",
+      error.message,
+    );
     const fluxUrl = buildFluxFallbackUrl(prompt);
     try {
       const { buffer, mimeType } = await downloadImageBuffer(fluxUrl, true);
@@ -604,7 +693,9 @@ async function generateImageUrlFromPrompt(promptText, options = {}) {
 
     const text =
       response?.text?.() ||
-      response?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join(" ") ||
+      response?.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text || "")
+        .join(" ") ||
       "";
     const url = extractUrlFromText(text);
     if (url) {
@@ -612,7 +703,10 @@ async function generateImageUrlFromPrompt(promptText, options = {}) {
     }
     return buildFluxFallbackUrl(prompt, options.seed);
   } catch (error) {
-    console.error("[image.service] generateImageUrlFromPrompt error:", error.message);
+    console.error(
+      "[image.service] generateImageUrlFromPrompt error:",
+      error.message,
+    );
     return buildFluxFallbackUrl(prompt, options.seed);
   }
 }
@@ -632,7 +726,9 @@ async function downloadImageBuffer(imageUrl, withMeta = false) {
 
   const contentType = String(response.headers?.["content-type"] || "");
   if (!contentType.startsWith("image/")) {
-    throw new Error(`Invalid content-type for image: ${contentType || "unknown"}`);
+    throw new Error(
+      `Invalid content-type for image: ${contentType || "unknown"}`,
+    );
   }
 
   const buffer = Buffer.from(response.data);
